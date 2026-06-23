@@ -1,5 +1,28 @@
 # devbox
 
+## Project: Agent Devbox
+
+Self-hosted platform for running coding agents in isolated, disposable execution
+environments. One task = one branch = one container; agents are treated as
+untrusted code; pull requests are the only human approval gate. Single-user V1.
+
+Requirements live in `docs/project/` (vision, architecture, security/threat model).
+The agreed technical design and milestones are in `TECHNICAL_DESIGN.md` — read it
+before implementing. Key approved decisions (see its Decision Log, D1–D11):
+
+- **Language:** Go (single static binary `agent-task`, `serve` runs the daemon).
+- **Architecture:** always-on daemon + thin CLI over a Unix socket (no TCP).
+- **Isolation:** rootless Podman + gVisor; the untrusted container shares **no git
+  repo and no GitHub token** with the host — source is copied in, commits come out
+  as a `git bundle` the host applies onto an `agent/*` feature branch.
+- **GitHub:** token is host-only; host pushes the branch and opens the PR.
+- **Runtime stack in the agent image:** Node/TS + Bun, Go, Python 3.
+- **Agents:** Claude Code, then Codex (Pi deferred).
+- **Persistence:** SQLite.
+
+Implementation has not started. Build milestone by milestone (M0 first), per the
+TECHNICAL_DESIGN milestones; do not write code ahead of an approved milestone.
+
 ## Agent skills
 
 ### Issue tracker
