@@ -5,7 +5,8 @@ and execution containers. This VM is provisioned and maintained **by hand**: the
 agent platform must never have Proxmox access (`docs/project/0003`). Proxmox is
 human-only.
 
-Related: issue #2 (provisioning), `docs/project/0002` (architecture / sizing),
+Related: issue #2 (provisioning), issue #3 (Tailscale + SSH),
+`docs/project/0002` (architecture / sizing),
 `docs/project/0003` (security & threat model).
 
 ## Host & sizing
@@ -64,3 +65,55 @@ redacted here and recorded out-of-band.
    ```
 
 4. **This runbook** records sizing and OS choice (above) — done.
+
+## Tailscale + SSH access (issue #3)
+
+Confirmed on the VM (verified 2026-06-23). Tailnet address redacted; recorded
+out-of-band. Security invariant (`docs/project/0003`): Tailscale serves
+**user→VM only** and must never be shared into execution containers.
+
+### Tailscale (user → VM only)
+
+- Installed via `curl -fsSL https://tailscale.com/install.sh | sh`; joined with
+  `sudo tailscale up` — **no** `--advertise-routes`, **no** `--advertise-exit-node`.
+- Tailnet IP: `100.x.y.<redacted>` (host `devbox`).
+- Host-only scoping confirmed: not an exit node, no subnet routes advertised,
+  `ExitNodeAllowLANAccess=false` (`tailscale debug prefs`). Tailscale does not
+  bridge the home LAN into the tailnet.
+- **Invariant for later milestones:** containers must get their own isolated
+  egress (Internet only) and must never see `tailscale0`. Do not advertise
+  routes or run Tailscale inside a container.
+
+### SSH (hardened, key-only)
+
+- sshd listens on all interfaces (`0.0.0.0:22`, `[::]:22`) — reachable over both
+  tailnet and LAN. ufw inactive.
+- Hardening drop-in `/etc/ssh/sshd_config.d/10-devbox-hardening.conf` (sorts
+  before the cloud-image default `50-cloud-init.conf`, so it wins on first-match):
+
+  ```
+  PermitRootLogin no
+  PasswordAuthentication no
+  PubkeyAuthentication yes
+  KbdInteractiveAuthentication no
+  ```
+
+  ```bash
+  sudo sshd -t && sudo systemctl restart ssh
+  sudo sshd -T | grep -Ei 'passwordauthentication|permitrootlogin|kbdinteractive'
+  # -> passwordauthentication no / permitrootlogin no / kbdinteractiveauthentication no
+  ```
+
+- Verified: key login from an authorized device succeeds; a device without an
+  authorized key is rejected (`Permission denied (publickey)`).
+- **Gotchas:** the Ubuntu cloud image ships `50-cloud-init.conf` with
+  `PasswordAuthentication yes` — the `10-` drop-in overrides it by lexical order.
+  Disabling `PasswordAuthentication` alone is insufficient on Ubuntu when PAM
+  keyboard-interactive is enabled, so `KbdInteractiveAuthentication no` is also set.
+
+### Reaching `agent-task` over the tailnet
+
+The orchestrator daemon listens on a **Unix socket, not TCP** (`CLAUDE.md`,
+decision D2). Access path: SSH to the VM over Tailscale → run the `agent-task`
+CLI locally → CLI talks to the daemon over the Unix socket. No TCP port is
+exposed on the tailnet. To be validated end-to-end once the daemon exists (M0).
