@@ -1,0 +1,51 @@
+[Unit]
+Description=agent-task orchestrator daemon (devbox)
+Documentation=https://github.com/qdrtech/devbox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Long-running socket daemon: it signals readiness via sd_notify once the Unix
+# socket is listening (implemented in M0). Until the M0 binary exists this unit
+# is installed but NOT started.
+Type=notify
+User=agent-taskd
+Group=agent-taskd
+
+# Binary produced by the M0 build (`go build -o /usr/local/bin/agent-task ./cmd/agent-task`).
+# Not present until M0 — do not `systemctl start` before then.
+ExecStart=/usr/local/bin/agent-task serve
+
+# Unix socket (D2, no TCP). A rootless service cannot own a bare /run/agent-task.sock,
+# so the socket lives in a systemd-managed runtime dir: /run/agent-task/agent-task.sock
+# (0660, owner agent-taskd). Mode 0750 lets the agent-taskd group (which the operator
+# joins) traverse the dir to reach the socket for the CLI.
+RuntimeDirectory=agent-task
+RuntimeDirectoryMode=0750
+
+# SQLite DB + host worktrees / mirror cache: /var/lib/agent-task (daemon-only).
+StateDirectory=agent-task
+StateDirectoryMode=0700
+
+# --- Secrets: systemd LoadCredential (root-owned 0600 source files) ---
+# Each secret is delivered read-only into $CREDENTIALS_DIRECTORY, owned by the
+# service user and unreadable by any other user (including agentbox, the
+# container-runner uid). The service user has NO other path to these secrets.
+# Per-repo, repository-scoped GitHub tokens (D11) are added one line each at M4,
+# named by the config `token_ref`; the model API key is wired the same way.
+LoadCredential=github-token:/etc/agent-task/credentials/github-token
+#LoadCredential=model-api-key:/etc/agent-task/credentials/model-api-key
+
+Restart=on-failure
+RestartSec=2s
+
+# --- Baseline hardening (safe for the M0 skeleton) ---
+# Tighter sandboxing (NoNewPrivileges, ProtectSystem=strict, syscall filters) is
+# deferred to M2: the runner's cross-user Podman invocation (daemon -> agentbox)
+# will dictate what is compatible, and NoNewPrivileges in particular would block
+# a sudo-based hop. Keep this minimal until that mechanism is chosen.
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

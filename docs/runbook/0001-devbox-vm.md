@@ -222,3 +222,116 @@ This host-global uid-deny is the **spike's** enforcement. When the runner is
 built, per-container isolated egress becomes the daemon's job; it must preserve
 the same deny-list. `agentbox` (or its successor runner user) must never be
 granted a path around these rules, and containers must never see `tailscale0`.
+
+## Host toolchain + agent-taskd service (issue #5)
+
+Confirmed on the VM (verified 2026-07-16). Prepares the host to build and run
+the orchestrator. The `agent-task` binary does **not** exist yet (M0 unstarted),
+so the systemd unit is installed but **not started** — this is a skeleton.
+
+### Toolchain
+
+| Tool | Version | Source |
+| ---- | ------- | ------ |
+| Go   | **1.26.5** | Official pinned tarball → `/usr/local/go` (see below) |
+| git  | 2.34.1  | distro (`apt`) |
+| gh   | 2.4.0   | distro (`apt`) — old (2022); upgrading via the official GitHub CLI apt repo is recommended but not required |
+
+The distro Go is 1.18 (too old). Install the current stable Go from `go.dev`,
+checksum-verified, into `/usr/local/go`; a `PATH` drop-in makes new shells prefer
+it over the apt `go1.18` at `/usr/bin/go` (left in place, shadowed):
+
+```bash
+GOVER=$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)
+cd /tmp && curl -fsSLO "https://go.dev/dl/${GOVER}.linux-amd64.tar.gz"
+EXPECT=$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
+  | jq -r --arg f "${GOVER}.linux-amd64.tar.gz" '.[].files[]|select(.filename==$f)|.sha256')
+echo "${EXPECT}  ${GOVER}.linux-amd64.tar.gz" | sha256sum -c -    # must print OK
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GOVER}.linux-amd64.tar.gz"
+echo 'export PATH=/usr/local/go/bin:$PATH' | sudo tee /etc/profile.d/go.sh >/dev/null
+```
+
+### Repo clone
+
+Cloned to **`/opt/devbox`** (owned by `qdrtech`) for building. The repo is
+private, so it is cloned with the **operator's own `gh` identity** (`gh auth
+login`, device flow) — deliberately **separate** from the daemon's machine-user
+GitHub token (D3), which is never used for source and is wired only at M4.
+
+```bash
+sudo mkdir -p /opt/devbox && sudo chown "$USER:$USER" /opt/devbox
+gh auth status || gh auth login
+gh repo clone qdrtech/devbox /opt/devbox
+```
+
+### Service user (`agent-taskd`, distinct from `agentbox`)
+
+The daemon runs as a dedicated system user **`agent-taskd`** (uid 998, own
+group, `/usr/sbin/nologin`, home `/var/lib/agent-task`) — **not** `agentbox`.
+Rationale: `agentbox` (uid 999) is the untrusted-container runner and the
+deliberate blast-radius target; keeping the token/DB owner a *different* uid
+means a container escape reaching host uid 999 still cannot read the daemon's
+secrets. The operator (`qdrtech`) is added to the `agent-taskd` group so the CLI
+can reach the daemon socket (needs a re-login to take effect).
+
+```bash
+sudo useradd --system --user-group --home-dir /var/lib/agent-task --no-create-home \
+  --shell /usr/sbin/nologin --comment "agent-taskd daemon" agent-taskd
+sudo usermod -aG agent-taskd qdrtech
+```
+
+### systemd unit + LoadCredential
+
+Unit source of truth: **`deploy/systemd/agent-taskd.service`** in the repo;
+install a copy to `/etc/systemd/system/`. Key settings: `User/Group=agent-taskd`,
+`Type=notify`, `RuntimeDirectory=agent-task` (socket
+`/run/agent-task/agent-task.sock`, `0660`), `StateDirectory=agent-task` (DB in
+`/var/lib/agent-task`), `Restart=on-failure`, and `LoadCredential=` for secrets.
+`ExecStart=/usr/local/bin/agent-task serve` — the binary is produced at M0, so
+**do not `systemctl start`** until then; only `daemon-reload`.
+
+Aggressive sandboxing (`NoNewPrivileges`, `ProtectSystem=strict`, syscall
+filters) is intentionally left out for now: the M2 runner's cross-user Podman
+hop (daemon → `agentbox`) will dictate what is compatible.
+
+Secrets are root-owned `0600` source files under `/etc/agent-task/credentials/`
+(dir `0700 root:root`), delivered by `LoadCredential` into the service's private
+`$CREDENTIALS_DIRECTORY` (`0400`, owned by `agent-taskd`, unreadable by anyone
+else). Per-repo, repository-scoped GitHub tokens (D11) are added one line each at
+M4; a sentinel placeholder stands in until then.
+
+```bash
+sudo install -d -m 0700 -o root -g root /etc/agent-task/credentials
+# real repo-scoped token replaces this sentinel at M4:
+printf 'SENTINEL-...' | sudo tee /etc/agent-task/credentials/github-token >/dev/null
+sudo chmod 0600 /etc/agent-task/credentials/github-token
+sudo systemctl daemon-reload   # NOT start — binary is M0
+```
+
+### Validation (all confirmed)
+
+- **Static:** `systemd-analyze verify /etc/systemd/system/agent-taskd.service`
+  reports only `Command /usr/local/bin/agent-task ... No such file` — expected,
+  the binary is M0; the unit itself parses clean.
+- **Secret negative:** `sudo -u agent-taskd cat /etc/agent-task/credentials/github-token`
+  → `Permission denied` (the `0600 root:root` source is unreadable by the service user).
+- **Secret positive (only via LoadCredential):**
+
+  ```bash
+  sudo systemd-run --uid=agent-taskd --pipe --wait -q \
+    -p LoadCredential=github-token:/etc/agent-task/credentials/github-token \
+    /bin/sh -c 'cat "$CREDENTIALS_DIRECTORY/github-token"; ls -l "$CREDENTIALS_DIRECTORY"'
+  ```
+
+  delivers the secret as `-r-------- agent-taskd` in `$CREDENTIALS_DIRECTORY`.
+  Together with the negative test this proves the service user reaches secrets
+  **only** through `LoadCredential`.
+
+### Deferred (not this issue)
+
+- **M0:** build the binary (`go build -o /usr/local/bin/agent-task ./cmd/agent-task`),
+  implement sd_notify readiness, then `systemctl enable --now`.
+- **M2:** cross-user hop for the daemon to drive `agentbox`'s rootless Podman;
+  finalize unit sandboxing around it.
+- **M4:** replace the sentinel with real per-repo, repository-scoped machine-user
+  tokens, one `LoadCredential=` line each.
