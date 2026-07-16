@@ -164,7 +164,7 @@ devbox/
                                                        (private ranges DENIED → no home LAN)
 ```
 
-- **`agent-task` (CLI):** `run`, `status`, `logs [-f]`, `cancel`, `ls`, `repos`. Thin client over `/run/agent-task.sock` (`0660`, owner = service user). No TCP surface (D2) → OS access (already gated by Tailscale+SSH) is the auth boundary.
+- **`agent-task` (CLI):** `run`, `status`, `logs [-f]`, `cancel`, `ls`, `repos`. Thin client over `/run/agent-task/agent-task.sock` (`0660`, owner = service user; a rootless service cannot own a bare `/run/*.sock`, so the socket lives in a systemd `RuntimeDirectory`). No TCP surface (D2) → OS access (already gated by Tailscale+SSH) is the auth boundary.
 - **`agent-taskd` (daemon, `agent-task serve`):** owns the SQLite DB, the repo mirror cache, the host-side feature worktrees, the Podman socket, and the GitHub token. Bounded worker pool: **2** concurrent tasks (D10). Each task = one goroutine walking the lifecycle (§7) with a `context` for cancellation/timeout. Survives client disconnect (long tasks keep running — 0001's pain point).
 
 ---
@@ -328,7 +328,7 @@ Mapped to 0003.
 §8: rootless Podman, non-root, cap-drop, read-only rootfs, no host mounts beyond an inert drop-dir, no shared repo/token, resource caps, disposability. gVisor (deferred — D5 amendment, #17) would additionally interpose a userspace kernel so the boundary is not the host kernel alone; until it lands, the kernel boundary is the host kernel plus the Proxmox-guest VM layer below it.
 
 ### 10.2 Trust boundaries & the daemon (Trust Boundaries, R3)
-Daemon exposes only a Unix socket (no TCP); access requires an OS session (already gated by Tailscale+SSH). The daemon is the crown jewel (Podman socket + tokens) — keeping it off the network is the primary control. `task_events` is an append-only audit trail.
+Daemon exposes only a Unix socket (no TCP); access requires an OS session (already gated by Tailscale+SSH). The daemon is the crown jewel (Podman socket + tokens) — keeping it off the network is the primary control. `task_events` is an append-only audit trail. The daemon runs as a **dedicated `agent-taskd` service user, distinct from `agentbox`** (the container-runner uid): secrets arrive via systemd `LoadCredential` into a per-service credentials dir the runner user cannot read, so a container escape that reaches host uid `agentbox` still cannot read the GitHub token or DB. The daemon's cross-user hop to drive `agentbox`'s rootless Podman is deferred to M2 (issue #5 established the user + unit skeleton).
 
 ### 10.3 Secrets (Secrets, [DEFAULT])
 Allowed: dev creds, repo creds, model API keys. Prohibited: production/cloud-admin creds, personal SSH keys — enforced by never wiring them in, plus an operator runbook. At rest: root-owned `0600`, via systemd `LoadCredential`; model key passed to the container by env at launch, never baked into the image. The GitHub token never enters the container at all (D3).
