@@ -33,13 +33,15 @@
 | D2 | Process architecture | **Daemon + thin CLI**, Unix-socket only (no TCP) | §5 |
 | D3 | GitHub token location | **Host-only.** The untrusted container never receives the token | §9, §10 |
 | D4 | Commit transfer | **Full transfer model.** No shared git repo with the container: host copies source *in*, agent commits locally, host extracts a `git bundle` *out* and applies onto the feature branch host-side | §8, §9 |
-| D5 | Container runtime | **Rootless Podman + gVisor (`runsc`)** | §8, §10 |
+| D5 | Container runtime | **Rootless Podman** (ships now); **gVisor (`runsc`) validated-deferred** — runner kept swappable so it can flip on later (amended 2026-06-23, see note below) | §8, §10 |
 | D6 | Base image | **Batteries-included**: Node/TS + **Bun**, Go, Python 3, plus common essentials | §8.7 |
 | D7 | Agents in V1 | **Claude Code** (M3) + **Codex** (M6). Pi designed-for, deferred | §8.8, §12 |
 | D8 | Task input | **Issue or free-form** (`--issue N` / `--task "…"`) | §7, §9 |
 | D9 | Success definition | **Agent exit 0 + ≥1 commit.** Tests run and attach to the PR but are informational | §7.3 |
 | D10 | Resource limits | **2 concurrent tasks, 30-min per-task timeout** (both config-overridable) | §5, §8.6 |
 | D11 | Repo resolution | **Static allowlist** in `config.yaml` (short name → owner/name/default-branch/token-ref). Doubles as the security allowlist | §6, §9 |
+
+**D5 amendment (2026-06-23, issues #4 / #17).** The isolation spine that ships first is **rootless Podman + the egress deny-list** (the egress control is the highest-severity protection — R2 — and is independent of the runtime). **gVisor (`runsc`)** moves from a day-one default to a *validated-deferred* layer: its overhead/compat and the cost of flipping the swappable runner over to it are measured in a follow-up spike (#17), and it is adopted as the default only if that move is cheap. Rootful Docker was explicitly rejected — the rootless property (a breakout lands unprivileged) is the point, and rootless Podman keeps it while supporting `runsc` first-class.
 
 Approved low-stakes defaults:
 
@@ -61,13 +63,13 @@ Approved low-stakes defaults:
 The two decisions that moved furthest from the first draft, and why:
 
 - **D3 + D4 (host-only token, full transfer model).** The untrusted container now shares **no git repository and no token** with the host. It receives a self-contained copy of the source, produces local commits, and emits an inert `git bundle`. The host is the sole writer to the real repo and the sole holder of the token. This closes the `.git`-hook escape class entirely: there is no agent-writable `.git` that a host git command ever reads or executes. The only secret that must exist inside the container is the **model API key** (the agent has to call the model) — rotatable, scoped, not infrastructure.
-- **D5 (rootless Podman + gVisor).** Removes the root daemon (a break-out lands unprivileged) *and* interposes a userspace kernel so the agent's syscalls never hit the host kernel directly — strong isolation without nested virtualization, which matters because the Devbox VM is itself a guest.
+- **D5 (rootless Podman; gVisor deferred).** Rootless Podman removes the root daemon, so a break-out lands unprivileged rather than as host root — the property that matters on a box sitting next to the home LAN. gVisor would add a userspace kernel so the agent's syscalls never hit the host kernel directly; that layer is deferred to a validation spike (#17) because the runner is swappable and the Devbox VM is already a hypervisor guest. The first-shipped protection against reaching the home network is the **egress deny-list** (R2/§8.5), which is independent of the runtime.
 
 ### 1.4 Residual risks (tracked)
 
 | # | Risk | Mitigation | Where |
 |---|------|------------|-------|
-| R1 | gVisor + rootless-Podman networking has known rough edges | Validate with a spike in M2 before committing; runner is abstracted so the runtime is swappable | §8.1, M2 |
+| R1 | gVisor + rootless-Podman networking has known rough edges | gVisor deferred (D5 amendment); validated in its own spike (#17) before adoption — runner is abstracted so the runtime is swappable. The spine ships on rootless Podman without it | §8.1, #17 |
 | R2 | Network egress is the highest-severity control | Isolated network + **deny private ranges** (not allow-list); tested as an M2 gate | §8.5 |
 | R3 | Daemon holds the Docker/Podman control socket + tokens = crown jewel | Unix-socket only, no TCP; OS access = Tailscale+SSH; append-only audit log | §5, §10.2 |
 | R4 | Per-task source copy costs I/O vs a shared object store | Acceptable on 200 GB SSD for known repos; shallow/single-branch copy; revisit for large monorepos | §8.4 |
@@ -96,7 +98,7 @@ Still genuinely open: see §3.
 
 ## 3. Open questions (non-blocking, tracked)
 
-- **[OPEN] OQ-1 — gVisor network mode under rootless Podman.** Exact config (pasta/slirp4netns + `runsc` + egress nft rules) to be settled by the M2 spike (R1).
+- **[OPEN] OQ-1 — rootless network mode + egress (now) / gVisor interop (deferred).** The rootless network mode (pasta/slirp4netns) and the egress nft rules are settled by the #4 spike. The `runsc` half — whether gVisor interoperates cleanly with the chosen network mode + egress rules — is deferred to the gVisor spike (#17, per the D5 amendment).
 - **[OPEN] OQ-2 — Base-image rebuild cadence.** How/when toolchains and agent CLIs get updated (manual rebuild vs scheduled). Deferred; manual for V1.
 - **[OPEN] OQ-3 — Multiple GitHub orgs.** V1 assumes one machine user; confirm no second org is needed before M4.
 - **[OPEN] OQ-4 — Large-repo performance** of the per-task source copy (R4). Measure on a real repo in M3; optimize only if needed.
@@ -239,7 +241,7 @@ Internal *phases* below occur **within `Running`** and are recorded as `task_eve
 2. **Create feature branch + host worktree** — host creates `agent/<agent>/<slug>-<shortid>` off the default branch in a host-controlled worktree (hooks disabled: `core.hooksPath=/dev/null`, `GIT_CONFIG_NOSYSTEM`).
 3. **Render prompt** — fetch the issue via `gh` (D8 `--issue`) or use `--task` text; write the prompt artifact.
 4. **Build source export** — host produces a self-contained copy of the repo at the base commit (shallow/single-branch) to hand to the container. **No remote, no token, no host `.git` shared.**
-5. **Launch container** — runner starts the rootless-Podman+gVisor container (§8): source copied in, prompt read-only, artifact drop-dir for output, isolated network, resource caps, model API key via env.
+5. **Launch container** — runner starts the rootless-Podman container (§8; gVisor runtime once #17 lands): source copied in, prompt read-only, artifact drop-dir for output, isolated network, resource caps, model API key via env.
 6. **Execute agent** — adapter runs the agent against the in-container copy; it makes local commits; stdout/transcript stream to artifacts.
 7. **Extract** — host obtains a `git bundle` of the agent's commits (`base..HEAD`) from the container's artifact drop-dir (inert data; never an agent-writable `.git` the host executes).
 8. **Apply host-side** — host `git fetch`/cherry-picks the bundle onto the feature branch in its hook-disabled worktree; captures the resulting `diff`; counts commits (`commit_count`).
@@ -264,7 +266,7 @@ Internal *phases* below occur **within `Running`** and are recorded as `task_eve
 Every choice assumes the agent inside is hostile (0003).
 
 ### 8.1 Runtime (D5)
-**Rootless Podman** with **gVisor (`runsc`)** as the OCI runtime. The `runner` package wraps the engine behind an interface so it is swappable (Docker fallback, or future Kata) without touching the controller. The exact rootless network mode (pasta/slirp4netns) + `runsc` + egress rules is validated by the **M2 spike** (R1).
+**Rootless Podman** as the engine, shipping with the standard OCI runtime; **gVisor (`runsc`)** is the intended hardening layer but is *validated-deferred* (D5 amendment — spike #17). The `runner` package wraps the engine behind an interface so the runtime is swappable (so `runsc` can flip on later, plus a Docker fallback or future Kata) without touching the controller. The rootless network mode (pasta/slirp4netns) + egress rules is validated by the **#4 spike** (R2); `runsc` interop with that network mode is validated by **#17** (R1).
 
 ### 8.2 No shared git repository (D4 — the core isolation property)
 The container is handed a **copy** of the source, not a mount of the real repo. There is no host-writable `.git` that any host process later reads/executes → the `.git`-hook escape class does not exist here.
@@ -323,7 +325,7 @@ The `agent/<agent>/…` branch namespace is reserved so GitHub **branch-protecti
 Mapped to 0003.
 
 ### 10.1 Untrusted container (Security Philosophy)
-§8: rootless Podman + gVisor, non-root, cap-drop, read-only rootfs, no host mounts beyond an inert drop-dir, no shared repo/token, resource caps, disposability. gVisor interposes a userspace kernel so the boundary is not the host kernel alone.
+§8: rootless Podman, non-root, cap-drop, read-only rootfs, no host mounts beyond an inert drop-dir, no shared repo/token, resource caps, disposability. gVisor (deferred — D5 amendment, #17) would additionally interpose a userspace kernel so the boundary is not the host kernel alone; until it lands, the kernel boundary is the host kernel plus the Proxmox-guest VM layer below it.
 
 ### 10.2 Trust boundaries & the daemon (Trust Boundaries, R3)
 Daemon exposes only a Unix socket (no TCP); access requires an OS session (already gated by Tailscale+SSH). The daemon is the crown jewel (Podman socket + tokens) — keeping it off the network is the primary control. `task_events` is an append-only audit trail.
@@ -338,7 +340,7 @@ Allowed: dev creds, repo creds, model API keys. Prohibited: production/cloud-adm
 The only outbound write to GitHub is *push branch + open PR*. No merge/deploy/infra/secret changes by the platform. Everything else is human, via PR review.
 
 ### 10.6 Compromise success criteria
-A compromised container has: no host fs, no tailnet, no private-range egress, no GitHub token, no shared repo, no infra creds, and a gVisor-mediated kernel boundary → cannot reach Proxmox/NAS/workstation or production secrets. Worst realistic case: abuse of the rotatable model API key and mischief inside its own throwaway source copy (discarded). Meets the stated bar.
+A compromised container has: no host fs, no tailnet, no private-range egress, no GitHub token, no shared repo, no infra creds, and (once #17 lands) a gVisor-mediated kernel boundary → cannot reach Proxmox/NAS/workstation or production secrets. Until gVisor lands, the breakout still lands as an unprivileged user inside the Proxmox-guest VM, contained by the egress deny-list. Worst realistic case: abuse of the rotatable model API key and mischief inside its own throwaway source copy (discarded). Meets the stated bar.
 
 ---
 
@@ -358,7 +360,7 @@ Each milestone is independently reviewable, ends in a working vertical slice, an
 
 - **M0 — Skeleton & store.** Go module; `agent-task`/`serve` scaffolding; `config.yaml` loader + repo registry (D11); SQLite store + migrations; task/event/artifact models. *Demo:* `agent-task repos` lists registered repos; `ls` shows an empty table. *Tests:* config validation, store CRUD, migration.
 - **M1 — Host repo & worktree manager.** Mirror clone/cache; fetch/sync; feature-branch worktree with hooks disabled; branch naming; orphan sweep. *Demo:* create + tear down a feature branch/worktree for a real repo. *Tests:* worktree create/remove, hook-disable, cleanup idempotency.
-- **M2 — Runner + isolation (security spine).** Rootless Podman + gVisor spike (R1, OQ-1); container with source copy-in, drop-dir copy-out, non-root/cap-drop/read-only rootfs, resource limits, isolated network + **egress deny-list**. *Demo (key gate):* container reaches the internet but **cannot** reach a known LAN host or the tailnet; bundle round-trips out. *Tests:* mount/boundary scoping, limits, egress assertions.
+- **M2 — Runner + isolation (security spine).** Rootless Podman spike (#4); container with source copy-in, drop-dir copy-out, non-root/cap-drop/read-only rootfs, resource limits, isolated network + **egress deny-list** (R2). gVisor (`runsc`) is validated-deferred — its spike (#17, R1) runs in parallel and feeds adoption, but the spine does not block on it. *Demo (key gate):* container reaches the internet but **cannot** reach a known LAN host or the tailnet; bundle round-trips out. *Tests:* mount/boundary scoping, limits, egress assertions.
 - **M3 — Claude Code adapter (end-to-end agent run).** Adapter interface + Claude adapter; prompt rendering (D8); run agent against the in-container copy; extract bundle; apply onto the feature branch host-side; capture log/transcript/diff/summary; measure copy cost (OQ-4). *Demo:* agent makes a real change in a test repo; commits land on the host feature branch; token never in container. *Tests:* adapter contract, bundle apply, success/timeout paths.
 - **M4 — GitHub integration (host-mediated).** Issue fetch → prompt; host push; templated PR; machine-user repo-scoped token via `LoadCredential` (D3). *Demo:* `agent-task run --repo case-tracker-fc --issue 34 --agent claude` → open PR + logs + summary + test results. *Tests:* prompt-from-issue rendering, PR body templating, token-isolation assertion.
 - **M5 — Lifecycle, concurrency & control.** Full state machine (§7); worker pool + 2-concurrent cap (D10); `cancel`; 30-min timeout; restart recovery + orphan teardown; audit events. *Demo:* two concurrent tasks; cancel one; restart daemon → clean recovery. *Tests:* transitions, cancellation, concurrency cap, recovery.
@@ -376,7 +378,7 @@ The 0001 success criterion (`agent-task run --repo case-tracker-fc --issue 34 --
 | D2 | Process architecture | Daemon + CLI, Unix socket | Approved |
 | D3 | Token location | Host-only | Approved |
 | D4 | Commit transfer | Full transfer model (copy in / bundle out) | Approved |
-| D5 | Runtime | Rootless Podman + gVisor | Approved |
+| D5 | Runtime | Rootless Podman (ships); gVisor deferred-validated (#17) | Approved — amended 2026-06-23 (#4) |
 | D6 | Base image | Batteries-included: Node/TS+Bun, Go, Python 3 | Approved |
 | D7 | Agents | Claude Code + Codex; Pi deferred | Approved |
 | D8 | Task input | Issue or free-form | Approved |
