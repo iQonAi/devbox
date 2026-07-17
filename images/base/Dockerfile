@@ -5,7 +5,6 @@ ARG BUN_VERSION=1.3.14
 ARG GO_VERSION=1.26.5
 ARG GO_SHA256_AMD64=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
 ARG GO_SHA256_ARM64=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
-ARG CLAUDE_CODE_VERSION=latest 
 ARG PI_VERSION=latest 
 ARG CODEX_VERSION=latest
 
@@ -56,7 +55,7 @@ RUN arch="$(dpkg --print-architecture)" \
    esac \
    && curl -fsSLo /tmp/go.tar.gz \
    "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" \
-   && echo "${GO_SHA256} /tmp/go.tar.gz" | sha256sum -c - \
+   && printf '%s  %s\n' "${GO_SHA256}" /tmp/go.tar.gz | sha256sum -c - \
    && rm -rf /usr/local/go \
    && tar -C /usr/local -xzf /tmp/go.tar.gz \
    && rm /tmp/go.tar.gz \

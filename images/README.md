@@ -18,7 +18,7 @@ nothing fetched at run time.
 | Go          | `GO_VERSION` (1.26.5)          | go.dev tarball, **sha256-verified**      |
 | Python      | 3.11 + pip + venv             | Debian `apt`                             |
 | Essentials  | git, ripgrep (`rg`), fd, build-essential, curl, jq, unzip, procps, xz-utils | `apt` |
-| Claude Code | `CLAUDE_CODE_VERSION` (latest) | native installer (`claude.ai/install.sh`) |
+| Claude Code | latest (installer-tracked)    | native installer (`claude.ai/install.sh`) |
 | Codex       | `CODEX_VERSION` (latest)       | `@openai/codex` (npm)                    |
 | Pi          | `PI_VERSION` (latest)          | `@earendil-works/pi-coding-agent` (npm)  |
 
@@ -55,10 +55,13 @@ missing or broken tool fails the build.
 Rebuild cadence is **manual for V1** — no scheduled/automatic rebuilds. To update:
 
 - **Toolchain / agent versions:** bump the `ARG`s at the top of the Dockerfile
-  (`BUN_VERSION`, `GO_VERSION`, `CLAUDE_CODE_VERSION`, `PI_VERSION`,
-  `CODEX_VERSION`), or override per build (`--build-arg PI_VERSION=0.80.10`).
-  For reproducible/release builds, **pin** the agent CLIs to explicit versions
-  rather than `latest`.
+  (`BUN_VERSION`, `GO_VERSION`, `PI_VERSION`, `CODEX_VERSION`), or override per
+  build (`--build-arg PI_VERSION=0.80.10`). For reproducible/release builds,
+  **pin** the npm-installed agent CLIs (Pi, Codex) to explicit versions rather
+  than `latest`. **Claude Code** installs via its native installer
+  (`claude.ai/install.sh`), which always tracks the latest release — it is not
+  ARG-pinnable; switch it to the `@anthropic-ai/claude-code` npm package if a
+  pinned Claude version is ever required.
 - **Go checksum (pinned):** `GO_VERSION` is verified against per-arch pinned
   hashes (`GO_SHA256_AMD64` / `GO_SHA256_ARM64`). When you bump `GO_VERSION`,
   update **both** from `https://go.dev/dl/go<version>.linux-<arch>.tar.gz.sha256`
