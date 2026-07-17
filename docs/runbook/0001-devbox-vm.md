@@ -261,7 +261,7 @@ GitHub token (D3), which is never used for source and is wired only at M4.
 ```bash
 sudo mkdir -p /opt/devbox && sudo chown "$USER:$USER" /opt/devbox
 gh auth status || gh auth login
-gh repo clone qdrtech/devbox /opt/devbox
+gh repo clone iQonAi/devbox /opt/devbox   # repo moved into the org in #6; was qdrtech/devbox
 ```
 
 ### Service user (`agent-taskd`, distinct from `agentbox`)
@@ -335,3 +335,93 @@ sudo systemctl daemon-reload   # NOT start — binary is M0
   finalize unit sandboxing around it.
 - **M4:** replace the sentinel with real per-repo, repository-scoped machine-user
   tokens, one `LoadCredential=` line each.
+
+## GitHub machine user + repo-scoped tokens (issue #6)
+
+Confirmed 2026-07-17. Delivers the first real token that #5 left as a sentinel.
+
+### Org + machine user
+
+- **Machine user:** `iQonAi-Bot` — a dedicated bot account (GitHub has no special
+  "machine user" type; it is a normal account used only for automation).
+  Attribution and credential isolation from the human `qdrtech` are the point.
+- **Org:** `iQonAi` (login `iqonai`; owner `qdrtech`; belongs to QDR Ventures LLC,
+  dba iQonAi). `iQonAi-Bot` is an org **Member** and a **Write** collaborator on
+  each managed repo (Write = minimal role that allows push + open PR).
+- **Repos moved into the org:** `devbox` (done here → `iQonAi/devbox`).
+  `claude-agent-config` and `case-tracker-fc` are deferred.
+
+**Why an org was required (not just the personal account + machine user).**
+Fine-grained PATs can only target resources owned by the **token creator's own
+account or an org they belong to** — an *outside collaborator* cannot mint a
+fine-grained token for another personal user's repo (documented GitHub
+limitation). With the repos under personal `qdrtech`, `iQonAi-Bot` could not
+mint repo-scoped tokens for them. Moving the repos into the `iQonAi` org (with
+`iQonAi-Bot` as a member) makes the org the token's resource owner, so
+fine-grained per-repo tokens work as `docs/project/0003` requires.
+
+### Token
+
+One **fine-grained** token per repo, minted as `iQonAi-Bot`:
+
+- **Resource owner:** the `iQonAi` org (not the bot's personal account).
+- **Repository access:** only the one repo (`iQonAi/devbox`).
+- **Permissions:** Contents R/W, Pull requests R/W, Issues R/W, Metadata R.
+  (Issues R/W is a deliberate grant beyond the `contents + PR` baseline so the
+  bot can create/manage issues; still repo-scoped.)
+- **Expiration:** 90 days — rotation is part of least privilege.
+
+> **Gotcha — org approval makes a new token inert.** With the org's "require
+> approval for fine-grained PATs" setting on, a freshly minted token has access
+> to **nothing** (404 on every repo, even its own) until the org owner approves
+> it: org `iQonAi` → Settings → Personal access tokens → **Pending requests** →
+> Approve. A 404 (not 401) on the repo is the tell — the token authenticates but
+> is unapproved.
+
+### Storage (`token_ref`)
+
+Stored on the VM at `/etc/agent-task/credentials/<token_ref>`, root-owned
+`0600`, referenced by name (the config `token_ref`); **never committed**.
+Naming: `gh-token-<repo>` → `gh-token-devbox`. The `agent-taskd` unit's
+`LoadCredential=` line points at it (replaces the #5 sentinel); deferred repos
+each add one line as they join the org.
+
+Write the token without echoing it into shell history or anywhere else — paste
+straight into a root-owned file, stripping the trailing newline:
+
+```bash
+sudo sh -c 'umask 077; tr -d "\n" > /etc/agent-task/credentials/gh-token-devbox'
+# paste the token, Enter, Ctrl-D
+sudo chmod 0600 /etc/agent-task/credentials/gh-token-devbox
+```
+
+### Host-only invariant (D3)
+
+The GitHub token is **host-only**: it lives on the host, delivered to the
+`agent-taskd` daemon via `LoadCredential`, and is used **only** for host-side
+operations (push branch, open PR, fetch issue). It is **never** placed in an
+execution container, in the copied-in source, or in the DB. The only secret a
+container ever receives is the model API key (M3), by env at launch.
+
+### Validation (all confirmed)
+
+- **Stored:** `gh-token-devbox` is `-rw------- root root`, 93 bytes,
+  `github_pat_` prefix.
+- **LoadCredential delivery:** `systemd-run --uid=agent-taskd -p LoadCredential=…`
+  delivers it as `-r-------- agent-taskd`, 93 bytes, in `$CREDENTIALS_DIRECTORY`.
+- **Negative direct read:** `sudo -u agent-taskd cat …/gh-token-devbox` →
+  `Permission denied`.
+- **Token valid + least-privilege:** `gh api repos/iQonAi/devbox` (with the token
+  in `GH_TOKEN`) → `iQonAi/devbox`, permissions `pull:true push:true`,
+  `admin:false maintain:false`.
+- **Repo-scoped:** the same token → **404** on a repo outside its scope
+  (`qdrtech/claude-agent-config`), confirming it cannot reach other repos.
+
+### Rotation & deferred
+
+- **Rotate** before the 90-day expiry: mint a new token (approve it), overwrite
+  the `0600` file, restart the daemon (once it exists, M0+).
+- **Deferred:** `gh-token-claude-agent-config` and `gh-token-case-tracker-fc`
+  (added when those repos join the org); the model API key (M3). Migration to a
+  **GitHub App** (short-lived installation tokens) remains an option if long-lived
+  PATs become a burden.
