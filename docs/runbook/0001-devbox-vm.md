@@ -11,14 +11,14 @@ Related: issue #2 (provisioning), issue #3 (Tailscale + SSH),
 
 ## Host & sizing
 
-| Property   | Value                          |
-| ---------- | ------------------------------ |
-| Hypervisor | Proxmox (human-only access)    |
-| vCPU       | 8                              |
-| RAM        | 16 GB                          |
-| Disk       | 250 GB SSD                     |
+| Property   | Value                       |
+| ---------- | --------------------------- |
+| Hypervisor | Proxmox (human-only access) |
+| vCPU       | 8                           |
+| RAM        | 16 GB                       |
+| Disk       | 250 GB SSD                  |
 
-`docs/project/0002` lists 200 GB SSD as the *recommended* minimum; this VM was
+`docs/project/0002` lists 200 GB SSD as the _recommended_ minimum; this VM was
 provisioned with 250 GB, which exceeds the recommendation.
 
 ## Operating system
@@ -139,7 +139,7 @@ M2/R2 and closes the rootless half of OQ-1. Scope amended per D5: gVisor
 
 `slirp4netns` does userspace NAT: it opens the container's egress sockets **from
 the host network namespace, as the uid running Podman**. So the host firewall
-never sees per-container source IPs (unlike rootful), but it *can* match the
+never sees per-container source IPs (unlike rootful), but it _can_ match the
 **owning uid**. Enforcement therefore:
 
 1. Runs all agent containers as a **dedicated unprivileged user `agentbox`
@@ -203,15 +203,15 @@ cd /tmp && sudo -u agentbox env HOME=/home/agentbox XDG_RUNTIME_DIR=/run/user/99
   podman run --rm --dns 9.9.9.9 alpine sh -c '...'
 ```
 
-| Target                          | Expected  | Result      |
-| ------------------------------- | --------- | ----------- |
-| Public DNS (`quad9.net`)        | resolves  | `dns-OK`    |
-| Public HTTP (`icanhazip.com`)   | reachable | `public-OK` |
-| `10.0.0.1` (RFC1918)            | blocked   | `blocked-OK`|
-| `172.16.0.1` (RFC1918)          | blocked   | `blocked-OK`|
-| home-LAN gateway (`<lan-gw>`)   | blocked   | `blocked-OK`|
-| tailnet host (`100.64/10`)      | blocked   | `blocked-OK`|
-| `169.254.169.254` (metadata)    | blocked   | `blocked-OK`|
+| Target                        | Expected  | Result       |
+| ----------------------------- | --------- | ------------ |
+| Public DNS (`quad9.net`)      | resolves  | `dns-OK`     |
+| Public HTTP (`icanhazip.com`) | reachable | `public-OK`  |
+| `10.0.0.1` (RFC1918)          | blocked   | `blocked-OK` |
+| `172.16.0.1` (RFC1918)        | blocked   | `blocked-OK` |
+| home-LAN gateway (`<lan-gw>`) | blocked   | `blocked-OK` |
+| tailnet host (`100.64/10`)    | blocked   | `blocked-OK` |
+| `169.254.169.254` (metadata)  | blocked   | `blocked-OK` |
 
 Baseline (before the deny-list) confirmed the hole was real: a default rootless
 container **did** reach the LAN gateway and the tailnet host. The rules close it.
@@ -231,11 +231,11 @@ so the systemd unit is installed but **not started** — this is a skeleton.
 
 ### Toolchain
 
-| Tool | Version | Source |
-| ---- | ------- | ------ |
-| Go   | **1.26.5** | Official pinned tarball → `/usr/local/go` (see below) |
-| git  | 2.34.1  | distro (`apt`) |
-| gh   | 2.4.0   | distro (`apt`) — old (2022); upgrading via the official GitHub CLI apt repo is recommended but not required |
+| Tool | Version    | Source                                                                                                      |
+| ---- | ---------- | ----------------------------------------------------------------------------------------------------------- |
+| Go   | **1.26.5** | Official pinned tarball → `/usr/local/go` (see below)                                                       |
+| git  | 2.34.1     | distro (`apt`)                                                                                              |
+| gh   | 2.4.0      | distro (`apt`) — old (2022); upgrading via the official GitHub CLI apt repo is recommended but not required |
 
 The distro Go is 1.18 (too old). Install the current stable Go from `go.dev`,
 checksum-verified, into `/usr/local/go`; a `PATH` drop-in makes new shells prefer
@@ -261,7 +261,7 @@ GitHub token (D3), which is never used for source and is wired only at M4.
 ```bash
 sudo mkdir -p /opt/devbox && sudo chown "$USER:$USER" /opt/devbox
 gh auth status || gh auth login
-gh repo clone iQonAi/devbox /opt/devbox   # repo moved into the org in #6; was qdrtech/devbox
+gh repo clone iQonAi/devbox /opt/devbox
 ```
 
 ### Service user (`agent-taskd`, distinct from `agentbox`)
@@ -269,7 +269,7 @@ gh repo clone iQonAi/devbox /opt/devbox   # repo moved into the org in #6; was q
 The daemon runs as a dedicated system user **`agent-taskd`** (uid 998, own
 group, `/usr/sbin/nologin`, home `/var/lib/agent-task`) — **not** `agentbox`.
 Rationale: `agentbox` (uid 999) is the untrusted-container runner and the
-deliberate blast-radius target; keeping the token/DB owner a *different* uid
+deliberate blast-radius target; keeping the token/DB owner a _different_ uid
 means a container escape reaching host uid 999 still cannot read the daemon's
 secrets. The operator (`qdrtech`) is added to the `agent-taskd` group so the CLI
 can reach the daemon socket (needs a re-login to take effect).
@@ -353,7 +353,7 @@ Confirmed 2026-07-17. Delivers the first real token that #5 left as a sentinel.
 
 **Why an org was required (not just the personal account + machine user).**
 Fine-grained PATs can only target resources owned by the **token creator's own
-account or an org they belong to** — an *outside collaborator* cannot mint a
+account or an org they belong to** — an _outside collaborator_ cannot mint a
 fine-grained token for another personal user's repo (documented GitHub
 limitation). With the repos under personal `qdrtech`, `iQonAi-Bot` could not
 mint repo-scoped tokens for them. Moving the repos into the `iQonAi` org (with
