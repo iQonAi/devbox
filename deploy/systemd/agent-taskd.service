@@ -1,6 +1,6 @@
 [Unit]
 Description=agent-task orchestrator daemon (devbox)
-Documentation=https://github.com/qdrtech/devbox
+Documentation=https://github.com/iQonAi/devbox
 After=network-online.target
 Wants=network-online.target
 
@@ -31,9 +31,14 @@ StateDirectoryMode=0700
 # Each secret is delivered read-only into $CREDENTIALS_DIRECTORY, owned by the
 # service user and unreadable by any other user (including agentbox, the
 # container-runner uid). The service user has NO other path to these secrets.
-# Per-repo, repository-scoped GitHub tokens (D11) are added one line each at M4,
-# named by the config `token_ref`; the model API key is wired the same way.
-LoadCredential=github-token:/etc/agent-task/credentials/github-token
+# One repository-scoped, fine-grained machine-user token per registered repo
+# (D11), named by the config `token_ref`. The machine user is `iQonAi-Bot`; its
+# tokens are minted with the org `iQonAi` as resource owner (see the runbook).
+# Deferred repos add one line each as they join the org; the per-agent model API
+# key (M3) is wired the same way.
+LoadCredential=gh-token-devbox:/etc/agent-task/credentials/gh-token-devbox
+#LoadCredential=gh-token-claude-agent-config:/etc/agent-task/credentials/gh-token-claude-agent-config
+#LoadCredential=gh-token-case-tracker-fc:/etc/agent-task/credentials/gh-token-case-tracker-fc
 #LoadCredential=model-api-key:/etc/agent-task/credentials/model-api-key
 
 Restart=on-failure

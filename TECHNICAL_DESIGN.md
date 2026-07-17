@@ -306,7 +306,7 @@ Container destroyed on completion/failure/cancel/daemon-restart-recovery; never 
 The repo-scoped fine-grained token is used **only** in the `github` package, **only on the host**, and is **never** placed in the container, the source export, the bundle, or the DB (only a `token_ref` name is stored). A compromised agent has no token to steal.
 
 ### 9.2 Credentials ([DEFAULT])
-One dedicated **machine user**; **fine-grained, repository-scoped** tokens, one per registered repo (D11), loaded via systemd `LoadCredential`. No personal/org-admin tokens (enforced by config policy + operator runbook).
+One dedicated **machine user**; **fine-grained, repository-scoped** tokens, one per registered repo (D11), loaded via systemd `LoadCredential`. No personal/org-admin tokens (enforced by config policy + operator runbook). Concretely (#6): machine user **`iQonAi-Bot`**, with the managed repos under the **`iQonAi` org** — fine-grained tokens require an org (or the creator's own account) as resource owner, so an outside collaborator on a personal repo cannot mint one; the org is what makes per-repo least-privilege tokens possible. Token perms: Contents + Pull requests + Issues (R/W), Metadata (R); repo-scoped; finite expiry (rotation). Operator setup is in the runbook.
 
 ### 9.3 Flow
 1. **Issue fetch** (`--issue`): `gh issue view N --json …` on the host → rendered into the prompt artifact. (`--task`: skip; use the provided text.)

@@ -11,14 +11,14 @@ Related: issue #2 (provisioning), issue #3 (Tailscale + SSH),
 
 ## Host & sizing
 
-| Property   | Value                          |
-| ---------- | ------------------------------ |
-| Hypervisor | Proxmox (human-only access)    |
-| vCPU       | 8                              |
-| RAM        | 16 GB                          |
-| Disk       | 250 GB SSD                     |
+| Property   | Value                       |
+| ---------- | --------------------------- |
+| Hypervisor | Proxmox (human-only access) |
+| vCPU       | 8                           |
+| RAM        | 16 GB                       |
+| Disk       | 250 GB SSD                  |
 
-`docs/project/0002` lists 200 GB SSD as the *recommended* minimum; this VM was
+`docs/project/0002` lists 200 GB SSD as the _recommended_ minimum; this VM was
 provisioned with 250 GB, which exceeds the recommendation.
 
 ## Operating system
@@ -139,7 +139,7 @@ M2/R2 and closes the rootless half of OQ-1. Scope amended per D5: gVisor
 
 `slirp4netns` does userspace NAT: it opens the container's egress sockets **from
 the host network namespace, as the uid running Podman**. So the host firewall
-never sees per-container source IPs (unlike rootful), but it *can* match the
+never sees per-container source IPs (unlike rootful), but it _can_ match the
 **owning uid**. Enforcement therefore:
 
 1. Runs all agent containers as a **dedicated unprivileged user `agentbox`
@@ -203,15 +203,15 @@ cd /tmp && sudo -u agentbox env HOME=/home/agentbox XDG_RUNTIME_DIR=/run/user/99
   podman run --rm --dns 9.9.9.9 alpine sh -c '...'
 ```
 
-| Target                          | Expected  | Result      |
-| ------------------------------- | --------- | ----------- |
-| Public DNS (`quad9.net`)        | resolves  | `dns-OK`    |
-| Public HTTP (`icanhazip.com`)   | reachable | `public-OK` |
-| `10.0.0.1` (RFC1918)            | blocked   | `blocked-OK`|
-| `172.16.0.1` (RFC1918)          | blocked   | `blocked-OK`|
-| home-LAN gateway (`<lan-gw>`)   | blocked   | `blocked-OK`|
-| tailnet host (`100.64/10`)      | blocked   | `blocked-OK`|
-| `169.254.169.254` (metadata)    | blocked   | `blocked-OK`|
+| Target                        | Expected  | Result       |
+| ----------------------------- | --------- | ------------ |
+| Public DNS (`quad9.net`)      | resolves  | `dns-OK`     |
+| Public HTTP (`icanhazip.com`) | reachable | `public-OK`  |
+| `10.0.0.1` (RFC1918)          | blocked   | `blocked-OK` |
+| `172.16.0.1` (RFC1918)        | blocked   | `blocked-OK` |
+| home-LAN gateway (`<lan-gw>`) | blocked   | `blocked-OK` |
+| tailnet host (`100.64/10`)    | blocked   | `blocked-OK` |
+| `169.254.169.254` (metadata)  | blocked   | `blocked-OK` |
 
 Baseline (before the deny-list) confirmed the hole was real: a default rootless
 container **did** reach the LAN gateway and the tailnet host. The rules close it.
@@ -231,11 +231,11 @@ so the systemd unit is installed but **not started** — this is a skeleton.
 
 ### Toolchain
 
-| Tool | Version | Source |
-| ---- | ------- | ------ |
-| Go   | **1.26.5** | Official pinned tarball → `/usr/local/go` (see below) |
-| git  | 2.34.1  | distro (`apt`) |
-| gh   | 2.4.0   | distro (`apt`) — old (2022); upgrading via the official GitHub CLI apt repo is recommended but not required |
+| Tool | Version    | Source                                                                                                      |
+| ---- | ---------- | ----------------------------------------------------------------------------------------------------------- |
+| Go   | **1.26.5** | Official pinned tarball → `/usr/local/go` (see below)                                                       |
+| git  | 2.34.1     | distro (`apt`)                                                                                              |
+| gh   | 2.4.0      | distro (`apt`) — old (2022); upgrading via the official GitHub CLI apt repo is recommended but not required |
 
 The distro Go is 1.18 (too old). Install the current stable Go from `go.dev`,
 checksum-verified, into `/usr/local/go`; a `PATH` drop-in makes new shells prefer
@@ -261,7 +261,7 @@ GitHub token (D3), which is never used for source and is wired only at M4.
 ```bash
 sudo mkdir -p /opt/devbox && sudo chown "$USER:$USER" /opt/devbox
 gh auth status || gh auth login
-gh repo clone qdrtech/devbox /opt/devbox
+gh repo clone iQonAi/devbox /opt/devbox
 ```
 
 ### Service user (`agent-taskd`, distinct from `agentbox`)
@@ -269,7 +269,7 @@ gh repo clone qdrtech/devbox /opt/devbox
 The daemon runs as a dedicated system user **`agent-taskd`** (uid 998, own
 group, `/usr/sbin/nologin`, home `/var/lib/agent-task`) — **not** `agentbox`.
 Rationale: `agentbox` (uid 999) is the untrusted-container runner and the
-deliberate blast-radius target; keeping the token/DB owner a *different* uid
+deliberate blast-radius target; keeping the token/DB owner a _different_ uid
 means a container escape reaching host uid 999 still cannot read the daemon's
 secrets. The operator (`qdrtech`) is added to the `agent-taskd` group so the CLI
 can reach the daemon socket (needs a re-login to take effect).
@@ -335,3 +335,93 @@ sudo systemctl daemon-reload   # NOT start — binary is M0
   finalize unit sandboxing around it.
 - **M4:** replace the sentinel with real per-repo, repository-scoped machine-user
   tokens, one `LoadCredential=` line each.
+
+## GitHub machine user + repo-scoped tokens (issue #6)
+
+Confirmed 2026-07-17. Delivers the first real token that #5 left as a sentinel.
+
+### Org + machine user
+
+- **Machine user:** `iQonAi-Bot` — a dedicated bot account (GitHub has no special
+  "machine user" type; it is a normal account used only for automation).
+  Attribution and credential isolation from the human `qdrtech` are the point.
+- **Org:** `iQonAi` (login `iqonai`; owner `qdrtech`; belongs to QDR Ventures LLC,
+  dba iQonAi). `iQonAi-Bot` is an org **Member** and a **Write** collaborator on
+  each managed repo (Write = minimal role that allows push + open PR).
+- **Repos moved into the org:** `devbox` (done here → `iQonAi/devbox`).
+  `claude-agent-config` and `case-tracker-fc` are deferred.
+
+**Why an org was required (not just the personal account + machine user).**
+Fine-grained PATs can only target resources owned by the **token creator's own
+account or an org they belong to** — an _outside collaborator_ cannot mint a
+fine-grained token for another personal user's repo (documented GitHub
+limitation). With the repos under personal `qdrtech`, `iQonAi-Bot` could not
+mint repo-scoped tokens for them. Moving the repos into the `iQonAi` org (with
+`iQonAi-Bot` as a member) makes the org the token's resource owner, so
+fine-grained per-repo tokens work as `docs/project/0003` requires.
+
+### Token
+
+One **fine-grained** token per repo, minted as `iQonAi-Bot`:
+
+- **Resource owner:** the `iQonAi` org (not the bot's personal account).
+- **Repository access:** only the one repo (`iQonAi/devbox`).
+- **Permissions:** Contents R/W, Pull requests R/W, Issues R/W, Metadata R.
+  (Issues R/W is a deliberate grant beyond the `contents + PR` baseline so the
+  bot can create/manage issues; still repo-scoped.)
+- **Expiration:** 90 days — rotation is part of least privilege.
+
+> **Gotcha — org approval makes a new token inert.** With the org's "require
+> approval for fine-grained PATs" setting on, a freshly minted token has access
+> to **nothing** (404 on every repo, even its own) until the org owner approves
+> it: org `iQonAi` → Settings → Personal access tokens → **Pending requests** →
+> Approve. A 404 (not 401) on the repo is the tell — the token authenticates but
+> is unapproved.
+
+### Storage (`token_ref`)
+
+Stored on the VM at `/etc/agent-task/credentials/<token_ref>`, root-owned
+`0600`, referenced by name (the config `token_ref`); **never committed**.
+Naming: `gh-token-<repo>` → `gh-token-devbox`. The `agent-taskd` unit's
+`LoadCredential=` line points at it (replaces the #5 sentinel); deferred repos
+each add one line as they join the org.
+
+Write the token without echoing it into shell history or anywhere else — paste
+straight into a root-owned file, stripping the trailing newline:
+
+```bash
+sudo sh -c 'umask 077; tr -d "\n" > /etc/agent-task/credentials/gh-token-devbox'
+# paste the token, Enter, Ctrl-D
+sudo chmod 0600 /etc/agent-task/credentials/gh-token-devbox
+```
+
+### Host-only invariant (D3)
+
+The GitHub token is **host-only**: it lives on the host, delivered to the
+`agent-taskd` daemon via `LoadCredential`, and is used **only** for host-side
+operations (push branch, open PR, fetch issue). It is **never** placed in an
+execution container, in the copied-in source, or in the DB. The only secret a
+container ever receives is the model API key (M3), by env at launch.
+
+### Validation (all confirmed)
+
+- **Stored:** `gh-token-devbox` is `-rw------- root root`, 93 bytes,
+  `github_pat_` prefix.
+- **LoadCredential delivery:** `systemd-run --uid=agent-taskd -p LoadCredential=…`
+  delivers it as `-r-------- agent-taskd`, 93 bytes, in `$CREDENTIALS_DIRECTORY`.
+- **Negative direct read:** `sudo -u agent-taskd cat …/gh-token-devbox` →
+  `Permission denied`.
+- **Token valid + least-privilege:** `gh api repos/iQonAi/devbox` (with the token
+  in `GH_TOKEN`) → `iQonAi/devbox`, permissions `pull:true push:true`,
+  `admin:false maintain:false`.
+- **Repo-scoped:** the same token → **404** on a repo outside its scope
+  (`qdrtech/claude-agent-config`), confirming it cannot reach other repos.
+
+### Rotation & deferred
+
+- **Rotate** before the 90-day expiry: mint a new token (approve it), overwrite
+  the `0600` file, restart the daemon (once it exists, M0+).
+- **Deferred:** `gh-token-claude-agent-config` and `gh-token-case-tracker-fc`
+  (added when those repos join the org); the model API key (M3). Migration to a
+  **GitHub App** (short-lived installation tokens) remains an option if long-lived
+  PATs become a burden.
