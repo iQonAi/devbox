@@ -35,7 +35,7 @@
 | D4 | Commit transfer | **Full transfer model.** No shared git repo with the container: host copies source *in*, agent commits locally, host extracts a `git bundle` *out* and applies onto the feature branch host-side | §8, §9 |
 | D5 | Container runtime | **Rootless Podman** (ships now); **gVisor (`runsc`) validated-deferred** — runner kept swappable so it can flip on later (amended 2026-06-23, see note below) | §8, §10 |
 | D6 | Base image | **Batteries-included**: Node/TS + **Bun**, Go, Python 3, plus common essentials | §8.7 |
-| D7 | Agents in V1 | **Claude Code** (M3) + **Codex** (M6). Pi designed-for, deferred | §8.8, §12 |
+| D7 | Agents in V1 | **Claude Code** (M3) + **Codex** (M6) + **Pi** (open, multi-provider). Pi's **CLI is included in the base image (#7)**; its adapter is staged after Codex | §8.8, §12 |
 | D8 | Task input | **Issue or free-form** (`--issue N` / `--task "…"`) | §7, §9 |
 | D9 | Success definition | **Agent exit 0 + ≥1 commit.** Tests run and attach to the PR but are informational | §7.3 |
 | D10 | Resource limits | **2 concurrent tasks, 30-min per-task timeout** (both config-overridable) | §5, §8.6 |
@@ -290,10 +290,10 @@ Host builds a shallow/single-branch copy at the base commit and copies it into t
 
 ### 8.7 Process hardening & image (D6)
 - Non-root user; `--cap-drop ALL` (re-add only if required); `--security-opt no-new-privileges`; read-only root fs except the source copy, `/task/out`, and a tmpfs `/tmp`.
-- **Base image** (`images/base`): Node LTS + **Bun**, Go, Python 3, plus `git`, `ripgrep`/`fd`, build toolchain, `curl`, and the agent CLIs (Claude Code, Codex). Build/update process documented (OQ-2).
+- **Base image** (`images/base`): Node LTS + **Bun**, Go, Python 3, plus `git`, `ripgrep`/`fd`, build toolchain, `curl`, and the agent CLIs (Claude Code, Codex, **Pi**). Built (#7) on `node:24-bookworm-slim`, non-root `agent` user, Go tarball sha256-verified, with a smoke-test gate. Build/update process documented (OQ-2, `images/README.md`).
 
 ### 8.8 Agent adapter interface (D7)
-One Go interface; each agent maps: image/command, how the prompt is passed, how to detect completion + exit code, where the transcript/summary land in `/task/out`. **Claude Code** lands in M3; **Codex** in M6 (proves the abstraction). **Pi** is designed-for (interface accommodates it) but not built.
+One Go interface; each agent maps: image/command, how the prompt is passed, how to detect completion + exit code, where the transcript/summary land in `/task/out`. **Claude Code** lands in M3; **Codex** in M6 (proves the abstraction). **Pi** (open, multi-provider) has its **CLI included in the base image (#7)**; its adapter is designed-for (the interface accommodates it) and staged after Codex.
 
 ### 8.9 Disposability
 Container destroyed on completion/failure/cancel/daemon-restart-recovery; never reused. Startup orphan sweep removes containers/host-worktrees for tasks already in a terminal state.
@@ -380,7 +380,7 @@ The 0001 success criterion (`agent-task run --repo case-tracker-fc --issue 34 --
 | D4 | Commit transfer | Full transfer model (copy in / bundle out) | Approved |
 | D5 | Runtime | Rootless Podman (ships); gVisor deferred-validated (#17) | Approved — amended 2026-06-23 (#4) |
 | D6 | Base image | Batteries-included: Node/TS+Bun, Go, Python 3 | Approved |
-| D7 | Agents | Claude Code + Codex; Pi deferred | Approved |
+| D7 | Agents | Claude Code + Codex + Pi; Pi CLI in base image (#7), adapter staged later | Approved — amended 2026-07-17 (#7) |
 | D8 | Task input | Issue or free-form | Approved |
 | D9 | Success def | Exit 0 + ≥1 commit; tests informational | Approved |
 | D10 | Limits | 2 concurrent / 30-min timeout | Approved |
