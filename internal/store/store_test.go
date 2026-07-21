@@ -27,7 +27,7 @@ func TestOpenMigrates(t *testing.T) {
 		t.Fatalf("count migrations: %v", err)
 	}
 	if count != 1 {
-		t.Errorf("scheme_migrations = %d, want 1", count)
+		t.Errorf("schema_migrations = %d, want 1", count)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestUpsertAndListRepos(t *testing.T) {
 	}
 
 	if repos[0].Name != "app" || repos[1].Name != "devbox" {
-		t.Errorf("order = %q,%q; want app, devbox", repos[1].Name, repos[1].Name)
+		t.Errorf("order = %q,%q; want app, devbox", repos[0].Name, repos[1].Name)
 	}
 
 	// Re-upsert "devbox" with a new owner; must UPDATE, not create a duplicate.
@@ -96,7 +96,7 @@ func TestUpsertAndListRepos(t *testing.T) {
 
 	repos, _ = s.ListRepos()
 	if len(repos) != 2 {
-		t.Fatalf("after re-upsert got %d, want 3 (no duplicate)", len(repos))
+		t.Fatalf("after re-upsert got %d, want 2 (no duplicate)", len(repos))
 	}
 	for _, r := range repos {
 		if r.Name == "devbox" && r.Owner != "changed" {

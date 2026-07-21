@@ -53,7 +53,7 @@ func TestRunServesOverSocket(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(repos) != 1 || repos[0].Name != "devbox" {
-		t.Fatalf("got %+v, want the seeded devbox repo", err)
+		t.Fatalf("got %+v, want the seeded devbox repo", repos)
 	}
 
 	cancel()
@@ -81,4 +81,43 @@ func waitForSocket(t *testing.T, path string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("socket never appeared")
+}
+
+// A socket file left behind by a crash has nothing listening on it, so it is
+// safe to remove. This path is what makes a restart-after-crash work.
+func TestRemoveStaleSocketClearsDeadSocket(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "dead.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	// Go unlinks a Unix socket on Close; disable that to simulate a crash,
+	// where the process dies without ever running its cleanup.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+
+	if err := removeStaleSocket(sock); err != nil {
+		t.Fatalf("removeStaleSocket: %v", err)
+	}
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Errorf("stale socket not removed: %v", err)
+	}
+}
+
+// A socket with a live daemon behind it must never be removed: that would
+// silently cut every connected client loose.
+func TestRemoveStaleSocketRefusesLiveSocket(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "live.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	if err := removeStaleSocket(sock); err == nil {
+		t.Fatal("expected an error for a socket in use, got nil")
+	}
+	if _, err := os.Stat(sock); err != nil {
+		t.Errorf("live socket was removed: %v", err)
+	}
 }

@@ -23,7 +23,7 @@ func TestLoadExampleConfig(t *testing.T) {
 func TestLoadRejectsInvalid(t *testing.T) {
 	cases := map[string]string{
 		"no repos":          "repos: []\n",
-		"duplicate name":    "repos:\n  - {name: a, owner: o, repo: r, token_ref: t}\n  - {name: a, owner: o, repo: r2, tt2}\n",
+		"duplicate name":    "repos:\n  - {name: a, owner: o, repo: r, token_ref: t}\n  - {name: a, owner: o, repo: r2, token_ref: t2}\n",
 		"missing token_ref": "repos:\n  - {name: a, owner: o, repo: r}\n",
 		"bad timeout":       "limits: {task_timeout: banana}\nrepos:\n  - {name: a, owner: o, repo: r, token_ref: t}\n",
 	}

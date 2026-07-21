@@ -17,17 +17,17 @@ func NewServer(s *store.Store) *Server {
 	return &Server{store: s}
 }
 
-// Handler builds the route table. http.ServerMux is the stdlib router; modern Go
+// Handler builds the route table. http.ServeMux is the stdlib router; modern Go
 // lets the method be part of the pattern, so a POST /v1/repos 405s for free.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/healthz", s.handleHearthz)
+	mux.HandleFunc("GET /v1/healthz", s.handleHealthz)
 	mux.HandleFunc("GET /v1/repos", s.handleRepos)
 	mux.HandleFunc("GET /v1/tasks", s.handleTasks)
 	return mux
 }
 
-func (s *Server) handleHearthz(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -35,6 +35,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 	repos, err := s.store.ListRepos()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 
 	if repos == nil {
@@ -47,6 +48,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.store.ListTasks()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 
 	if tasks == nil {
@@ -56,7 +58,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeJSON sets the header, status, and body - in that order, which matters:
-// after WriteHeader the headers are already on the write.
+// after WriteHeader the headers are already on the wire.
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

@@ -21,7 +21,7 @@ func fakeDaemon(t *testing.T, handler http.Handler) string {
 	return sock
 }
 
-func TestReposDecodees(t *testing.T) {
+func TestReposDecodes(t *testing.T) {
 	sock := fakeDaemon(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/repos" {
 			t.Errorf("path = %q, want /v1/repos", r.URL.Path)
@@ -48,7 +48,7 @@ func TestErrorStatusIsReported(t *testing.T) {
 	}
 }
 
-func TestNotDaemonIsAnError(t *testing.T) {
+func TestNoDaemonIsAnError(t *testing.T) {
 	if _, err := New(filepath.Join(t.TempDir(), "nope.sock")).Repos(); err == nil {
 		t.Fatalf("expected an error when the sock does not exist, got nil")
 	}

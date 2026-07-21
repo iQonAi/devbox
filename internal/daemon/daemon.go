@@ -39,7 +39,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	ln, err := listen(cfg.SocketPath)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	srv := &http.Server{Handler: api.NewServer(st).Handler()}
@@ -109,10 +109,11 @@ func listen(path string) (net.Listener, error) {
 		return nil, fmt.Errorf("listen %s: %w", path, err)
 	}
 
-	// The socket is created with the process umask applied, so the set set mode
-	// we actually want explicityly
+	// The socket is created with the process umask applied, so set the mode we
+	// actually want explicitly.
 	if err := os.Chmod(path, socketMode); err != nil {
 		ln.Close()
+		return nil, fmt.Errorf("chmod socket: %w", err)
 	}
 	return ln, nil
 }
@@ -129,9 +130,10 @@ func removeStaleSocket(path string) error {
 		return fmt.Errorf("stat socket: %w", err)
 	}
 
-	// Dial the socket
+	// A successful dial means a daemon is listening: refuse rather than steal it.
+	// A failed dial means nothing is on the other end, so the file is stale.
 	conn, err := net.DialTimeout("unix", path, time.Second)
-	if err != nil {
+	if err == nil {
 		conn.Close()
 		return fmt.Errorf("socket %s is already in use by a running daemon", path)
 	}
@@ -140,6 +142,6 @@ func removeStaleSocket(path string) error {
 		return fmt.Errorf("removing stale socket: %w", err)
 	}
 
-	slog.Warn("removed satale socket", path, path)
+	slog.Warn("removed stale socket", "path", path)
 	return nil
 }

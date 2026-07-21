@@ -34,7 +34,7 @@ func main() {
 	case "ls":
 		err = runLs(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknonw command %q\n\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", os.Args[1])
 		usage()
 		os.Exit(2)
 	}
