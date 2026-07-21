@@ -96,7 +96,7 @@ func runRepos(args []string) error {
 	// tabwriter bufferes every row, then pads columns to the widest cell - which
 	// is why nothing prints until Flush
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tOwner\tREPO\tBRANCH\tTOKEN_REF")
+	fmt.Fprintln(tw, "NAME\tOWNER\tREPO\tBRANCH\tTOKEN_REF")
 	for _, r := range repos {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 			r.Name, r.Owner, r.Repo, r.DefaultBranch, r.TokenRef)
@@ -116,7 +116,7 @@ func runLs(args []string) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tREPO_ID\tSOURCE\tSTATE\tCreated")
+	fmt.Fprintln(tw, "ID\tREPO_ID\tSOURCE\tSTATE\tCREATED")
 	for _, t := range tasks {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", t.ID, t.RepoID, t.Source, t.State, t.CreatedAt.Format(time.RFC3339))
 	}

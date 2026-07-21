@@ -63,7 +63,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	case <-ctx.Done():
 	}
 
-	slog.Info("Shutting Down")
+	slog.Info("shutting down")
 	if err := sdNotify("STOPPING=1"); err != nil {
 		slog.Warn("sd_notify STOPPING failed", "error", err)
 	}

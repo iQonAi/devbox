@@ -49,7 +49,7 @@ func (c *Client) Tasks() ([]store.Task, error) {
 func (c *Client) get(path string, out any) error {
 	resp, err := c.http.Get("http://unix" + path)
 	if err != nil {
-		return fmt.Errorf("connect daemon at %s (is daemon task running ?): %w", c.socket, err)
+		return fmt.Errorf("connect to daemon at %s (is agent-taskd running?): %w", c.socket, err)
 	}
 	defer resp.Body.Close()
 
