@@ -1,0 +1,16 @@
+# Example config for the agent-task daemon. Copy to config.yaml and edit
+# NO real secrets here - token_ref is the LoadCredential secret name only
+
+socket_path: /run/agent-task/agent-task.sock
+data_dir: /var/lib/agent-task
+
+limits:
+  max_concurrent: 2
+  task_timeout: 30m
+
+repos:
+  - name: devbox
+    owner: iQonAi
+    repo: devbox
+    default_branch: main
+    token_ref: gh-token-devbox
