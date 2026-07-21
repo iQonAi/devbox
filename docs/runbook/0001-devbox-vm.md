@@ -329,8 +329,8 @@ sudo systemctl daemon-reload   # NOT start — binary is M0
 
 ### Deferred (not this issue)
 
-- **M0:** build the binary (`go build -o /usr/local/bin/agent-task ./cmd/agent-task`),
-  implement sd_notify readiness, then `systemctl enable --now`.
+- ~~**M0:** build the binary, implement sd_notify readiness, then
+  `systemctl enable --now`.~~ Done — see "M0 orchestrator deploy (issue #8)".
 - **M2:** cross-user hop for the daemon to drive `agentbox`'s rootless Podman;
   finalize unit sandboxing around it.
 - **M4:** replace the sentinel with real per-repo, repository-scoped machine-user
@@ -425,3 +425,94 @@ container ever receives is the model API key (M3), by env at launch.
   (added when those repos join the org); the model API key (M3). Migration to a
   **GitHub App** (short-lived installation tokens) remains an option if long-lived
   PATs become a burden.
+
+## M0 orchestrator deploy (issue #8)
+
+Confirmed on the VM (verified 2026-07-21). The `agent-task` binary now exists, so
+the unit installed in #5 is finally **started**. This is the first time the
+daemon runs as `agent-taskd` under systemd.
+
+### Build & install
+
+Built by the operator in `/opt/devbox`, installed to `/usr/local/bin` as root.
+Build as yourself, not as root — nothing about compiling needs privilege:
+
+```bash
+cd /opt/devbox && git checkout main && git pull
+go build -o /tmp/agent-task ./cmd/agent-task
+sudo install -m 0755 -o root -g root /tmp/agent-task /usr/local/bin/agent-task
+```
+
+Keep the installed unit in sync with the repo copy (source of truth), which
+matters after the org transfer — an older copy still pointed `Documentation=` at
+the pre-transfer URL:
+
+```bash
+sudo install -m 0644 /opt/devbox/deploy/systemd/agent-taskd.service \
+  /etc/systemd/system/agent-taskd.service
+sudo systemctl daemon-reload
+```
+
+### Config (`/etc/agent-task/config.yaml`)
+
+`root:root 0644` — deliberately world-readable, because it holds **no secrets**.
+`token_ref` names a `LoadCredential` entry (D11/D3); the token itself never
+appears here. The daemon reads this file as `agent-taskd`, so it must not be
+`0600 root`.
+
+```yaml
+socket_path: /run/agent-task/agent-task.sock
+data_dir: /var/lib/agent-task
+limits:
+  max_concurrent: 2
+  task_timeout: 30m
+repos:
+  - name: devbox
+    owner: iQonAi
+    repo: devbox
+    default_branch: main
+    token_ref: gh-token-devbox
+```
+
+`socket_path` and `data_dir` match systemd's `RuntimeDirectory=`/`StateDirectory=`;
+setting them explicitly keeps the file self-describing.
+
+```bash
+sudo systemctl enable --now agent-taskd
+```
+
+### Validation (all confirmed)
+
+- **`Type=notify` readiness:** `Starting…` and `Started…` are logged in the same
+  second. This is the real test of `sd_notify` — outside systemd `NOTIFY_SOCKET`
+  is unset and the call is a no-op, so it had never executed for real. A broken
+  notify shows up as a ~90s hang ending in a timeout, not an error.
+- **Socket boundary:** `/run/agent-task/agent-task.sock` is
+  `660 agent-taskd:agent-taskd`; `/run/agent-task` is `750 agent-taskd:agent-taskd`.
+  The daemon chmods the socket explicitly after bind, because the process umask
+  would otherwise decide a security-relevant mode.
+- **Operator access:** `qdrtech` (member of `agent-taskd`) runs `agent-task repos`
+  and `agent-task ls` successfully — registry seeded from config, empty task table.
+- **Negative — the container-runner uid is locked out:**
+  `sudo -u agentbox agent-task repos` → `connect: permission denied`, exit 1.
+  `agentbox` is the deliberate blast-radius target (D-isolation); it must never
+  be able to drive the orchestrator, and the socket mode enforces that
+  independently of any application-level check.
+- **State:** `/var/lib/agent-task/agent-task.db` is owned by uid 998
+  (`agent-taskd`), inside the `0700` `StateDirectory`.
+- **Restart:** `systemctl restart` re-opens the existing DB without re-applying
+  migrations or duplicating registry rows; `repos` still lists exactly one entry.
+- **Logs:** Go `slog` JSON lines land in the journal
+  (`journalctl -u agent-taskd`), with a clean `shutting down` on stop.
+
+### Notes & deferred
+
+- The DB file is created `0644` (SQLite honours the default umask); it is
+  protected today solely by the `0700` `StateDirectory`. Harmless while that
+  holds — the DB stores prompts, task state, and summaries, never tokens — but
+  the file mode should not be relied on if that directory mode ever loosens.
+- **Upgrades** are `go build` → `install` → `systemctl restart`; there is no
+  packaging step yet.
+- **Deferred:** unit sandboxing (`NoNewPrivileges`, `ProtectSystem=strict`,
+  syscall filters) still waits on M2's cross-user Podman hop; the socket is
+  read-only API surface until task creation lands in M1+.
