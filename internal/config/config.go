@@ -2,14 +2,16 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+const DefaultSocketPath = "/run/agent-task/agent-task.sock"
 
 // Defaults applied when a field is left unset in config.yaml
 const (
-	defaultSocketPath    = "/run/agent-task/agent-task.sock"
 	defaultDataDir       = "/var/lib/agent-task"
 	defaultMaxConcurrent = 2
 	defaultTaskTimeout   = "30m"
@@ -64,9 +66,8 @@ func Load(path string) (*Config, error) {
 
 // applyDefaults fills unset fields with sensible defaults
 func (c *Config) applyDefaults() {
-
 	if c.SocketPath == "" {
-		c.SocketPath = defaultSocketPath
+		c.SocketPath = DefaultSocketPath
 	}
 
 	if c.DataDir == "" {
