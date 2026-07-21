@@ -8,11 +8,11 @@ import (
 // Task is a row in the tasks table. M0 only reads; task creation lands in M1
 // so we select just the always-present columns for now.
 type Task struct {
-	ID        string
-	RepoID    int64
-	Source    string
-	State     string
-	CreatedAt time.Time
+	ID        string    `json:"id"`
+	RepoID    int64     `json:"repo_id"`
+	Source    string    `json:"source"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // ListTasks returns all tasks, newest first.  Empty at M0 (nothing creates tasks yet).

@@ -4,13 +4,13 @@ import "fmt"
 
 // Repo is a row in the repos table (static registry)
 type Repo struct {
-	ID            int64
-	Name          string
-	Owner         string
-	Repo          string
-	DefaultBranch string
-	MirrorPath    string
-	TokenRef      string
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Owner         string `json:"owner"`
+	Repo          string `json:"repo"`
+	DefaultBranch string `json:"default_branch"`
+	MirrorPath    string `json:"mirror_path"`
+	TokenRef      string `json:"token_ref"`
 }
 
 // Upsert inserts into a repo, or update it if no one with the same name exists.
