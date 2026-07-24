@@ -60,3 +60,25 @@ func (s *Store) ListRepos() ([]Repo, error) {
 	}
 	return repos, nil
 }
+
+// SetMirrorPath records where a repo's mirror cache lives. Deliberately
+// separate from UpsertRepo: mirror_path is host state discovered at runtime,
+// not config, so re-seeding the registry must never clobber it.
+func (s *Store) SetMirrorPath(name, path string) error {
+	res, err := s.db.Exec(`UPDATE repos set mirror_path = ? WHERE name = ?`, path, name)
+	if err != nil {
+		return fmt.Errorf("set mirror_path for %q: %w", name, err)
+	}
+
+	// An UPDATE that matches nothing is not an SQL error - it is a silent
+	// no-op, so check explicitly rather than assume the repo existted.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("no repo named %q", name)
+	}
+
+	return nil
+}
