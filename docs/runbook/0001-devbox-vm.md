@@ -516,3 +516,74 @@ sudo systemctl enable --now agent-taskd
 - **Deferred:** unit sandboxing (`NoNewPrivileges`, `ProtectSystem=strict`,
   syscall filters) still waits on M2's cross-user Podman hop; the socket is
   read-only API surface until task creation lands in M1+.
+
+## M1 host repo/worktree manager (issue #9)
+
+Confirmed on the VM (verified 2026-07-24). Host-side git state management —
+the mirror cache and feature-branch worktrees — that M3+ drives per task. M1
+adds **no** operator command yet; sync is triggered by the task lifecycle,
+which lands later. Verified out-of-band with a throwaway program (below).
+
+### What it does
+
+- **Mirror cache** at `<data_dir>/mirrors/<name>.git` — a bare `--mirror` clone,
+  cloned to a `.tmp` path and atomically renamed so an interrupted clone never
+  leaves a directory that later looks like a valid cache. Re-runs `git fetch
+  --prune` instead of re-cloning.
+- **Worktrees** at `<data_dir>/worktrees/<task-id>`, each on a fresh
+  `agent/<agent>/<slug>-<shortid>` branch off the mirror's default branch. The
+  `agent/` prefix reserves the namespace for future GitHub branch-protection
+  (design §8.3).
+- **Hooks disabled on every host-side git call.** All git runs through
+  `internal/gitx`, which injects `core.hooksPath=/dev/null`,
+  `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, and
+  `GIT_TERMINAL_PROMPT=0`, and builds the environment from scratch rather than
+  inheriting the daemon's. Agent-authored content (copied-in source, bundles)
+  is untrusted, and git executes code from the repo it operates on.
+- **Orphan sweep** at daemon startup removes worktrees/branches for
+  terminal-state tasks left by a previous run; best-effort and idempotent.
+
+### Credential path (host-only, D3)
+
+Private-repo clone/fetch authenticates as the machine user via a git credential
+helper fed the token through the **environment**, never argv — `/proc/<pid>/cmdline`
+is world-readable. The token is resolved from `$CREDENTIALS_DIRECTORY` (systemd
+`LoadCredential`); auth is **optional**, so a public repo clones anonymously and
+development runs outside systemd need no token. The token never enters a
+container and never lands in `.git/config` or on disk.
+
+### Validation
+
+Unit tests cover clone/fetch, worktree create/remove, hook-disable (a planted
+hook is proven **not** to fire), and sweep idempotency — all against local
+`file://` origins, no network. The one path tests cannot reach — auth against
+real `github.com` — was verified on the VM with a throwaway program
+(`cmd/verify-m1`, **not committed**) run as the service user with the token
+delivered exactly as the daemon will get it:
+
+```bash
+sudo systemd-run --uid=agent-taskd --pipe --wait -q \
+  -p LoadCredential=gh-token-devbox:/etc/agent-task/credentials/gh-token-devbox \
+  -p 'Environment=PATH=/usr/local/go/bin:/usr/bin:/bin' \
+  /tmp/verify-m1
+```
+
+Output confirmed the full round trip:
+
+```
+mirror synced: /tmp/m1-verify/mirrors/devbox.git
+worktree: /tmp/m1-verify/worktrees/verify-task branch: agent/claude/m1-smoke-test-smoke01
+worktree torn down OK
+```
+
+i.e. the machine-user token (delivered only via `LoadCredential`) cloned the
+**private** `iQonAi/devbox` through the credential helper, a worktree was
+created off `main`, and teardown removed it. The throwaway and its scratch dir
+(`/tmp/m1-verify`) were deleted afterward.
+
+### Deferred (not this issue)
+
+- **M3+:** task lifecycle drives `Sync` + worktree create per run; the sweep
+  gains real tasks to act on.
+- No operator-facing sync/worktree command yet — intentional; M1 is the library
+  layer the controller calls.

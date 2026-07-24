@@ -120,3 +120,146 @@ func TestListTasksEmpty(t *testing.T) {
 		t.Errorf("fresh DB has %d tasks, want 0", len(tasks))
 	}
 }
+
+func TestSetMirrorPathSurvivesUpsert(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	base := Repo{Name: "devbox", Owner: "iQonAi", Repo: "devbox", DefaultBranch: "main", TokenRef: "t"}
+	if err := s.UpsertRepo(base); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := s.SetMirrorPath("devbox", "/var/lib/agent-task/mirrors/devbox.git"); err != nil {
+		t.Fatalf("set mirror path: %v", err)
+	}
+
+	// Re-seeding from config (as the daemon does on every start) must not
+	// erase host state.
+	if err := s.UpsertRepo(base); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+	repos, err := s.ListRepos()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if repos[0].MirrorPath != "/var/lib/agent-task/mirrors/devbox.git" {
+		t.Errorf("mirror_path clobbered by upsert: %q", repos[0].MirrorPath)
+	}
+}
+
+func TestSetMirrorPathUnknownRepo(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.SetMirrorPath("nope", "/x"); err == nil {
+		t.Fatal("expected an error for an unknown repo, got nil")
+	}
+}
+
+// seedRepo inserts one repo and returns it's id.
+func seedRepo(t *testing.T, s *Store) int64 {
+	t.Helper()
+	if err := s.UpsertRepo(Repo{Name: "devbox", Owner: "iQonAi", Repo: "devbox", DefaultBranch: "main", TokenRef: "t"}); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+	if err := s.SetMirrorPath("devbox", "/mirrors/devbox.git"); err != nil {
+		t.Fatalf("set mirror: %v", err)
+	}
+	repos, _ := s.ListRepos()
+	return repos[0].ID
+}
+
+func TestCreateAndListTask(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	repoID := seedRepo(t, s)
+
+	if err := s.CreateTask(NewTask{
+		ID: "task-1", RepoID: repoID, Source: "manual", Agent: "claude",
+		Branch: "agent/claude/x-abc1234", HostWorktree: "/wt/task-1",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	tasks, err := s.ListTasks()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "task-1" || tasks[0].State != StateCreated {
+		t.Fatalf("got %+v", tasks)
+	}
+}
+
+// A task's FK to a non-existent repo must be rejected - proves foreign_keys is
+// actually on (the DSN pragma), not silently ignored.
+func TestCreateTaskBadRepoFails(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.CreateTask(NewTask{ID: "x", RepoID: 999, Source: "manual"}); err == nil {
+		t.Fatalf("expected FK violation for unknown repo_id, got nil")
+	}
+}
+
+func TestSweepableTasksOnlyTerminalWithWorktree(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	repoID := seedRepo(t, s)
+
+	mk := func(id, state, worktree string) {
+		if err := s.CreateTask(NewTask{ID: id, RepoID: repoID, Source: "manual", Branch: "b-" + id, HostWorktree: worktree}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		if state != StateCreated {
+			if err := s.UpdateTaskState(id, state); err != nil {
+				t.Fatalf("state %s: %v", id, err)
+			}
+		}
+	}
+
+	mk("done", StateCompleted, "/wt/done")  // sweepable
+	mk("failed", StateFailed, "/wt/failed") // sweepable
+	mk("running", StateRunning, "/wt/run")  // live: skip
+	mk("nowt", StateCompleted, "")          // terminal but no worktree: skip
+
+	got, err := s.SweepableTasks()
+	if err != nil {
+		t.Fatalf("sweepable: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, task := range got {
+		ids[task.ID] = true
+		if task.MirrorPath != "/mirrors/devbox.git" {
+			t.Errorf("%s mirror = %q", task.ID, task.MirrorPath)
+		}
+	}
+	if len(got) != 2 || !ids["done"] || !ids["failed"] {
+		t.Errorf("sweepable = %v, want {done, failed}", ids)
+	}
+}
+
+func TestUpdateTaskStateUnknown(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	if err := s.UpdateTaskState("nope", StateFailed); err == nil {
+		t.Fatal("expected an error for unknown task, got nil")
+	}
+}

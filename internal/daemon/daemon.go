@@ -13,6 +13,7 @@ import (
 
 	"github.com/iQonAi/devbox/internal/api"
 	"github.com/iQonAi/devbox/internal/config"
+	"github.com/iQonAi/devbox/internal/repo"
 	"github.com/iQonAi/devbox/internal/store"
 )
 
@@ -35,6 +36,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	if err := seedRepos(st, cfg); err != nil {
 		return err
+	}
+
+	// Sweep orphaned worktrees left by terminal tasks from a previous run
+	// (crash, kill, or clean shutdown mid-task). Best-effort: a sweep failure
+	// must not stop the daemon from serving.
+	mgr := repo.NewManager(cfg.DataDir)
+	if n, err := mgr.Sweep(ctx, st); err != nil {
+		slog.Error("orphan sweep failed", "error", err)
+	} else if n > 0 {
+		slog.Info("orphan sweep", "removed", n)
 	}
 
 	ln, err := listen(cfg.SocketPath)
