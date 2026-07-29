@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -110,6 +111,29 @@ func NewPodmanRunner(base, env []string) *PodmanRunner {
 	return &PodmanRunner{cmd: execCommander{base: base, env: env}}
 }
 
+// seedOutDir creates an empty /task/out inside the container by copying an empty
+// host dir named "out" into /task. The seed dir is world-accessible because in
+// production agentbox (not this process) reads it during the copy.
+func (r *PodmanRunner) seedOutDir(ctx context.Context, name string) error {
+	parent, err := os.MkdirTemp("", "agent-seed-")
+	if err != nil {
+		return fmt.Errorf("seed out dir: %w", err)
+	}
+	defer os.RemoveAll(parent)
+
+	out := filepath.Join(parent, "out")
+	if err := os.Mkdir(out, 0o777); err != nil {
+		return fmt.Errorf("seed out dir: %w", err)
+	}
+	_ = os.Chmod(parent, 0o777)
+	_ = os.Chmod(out, 0o777)
+
+	if _, _, err := r.cmd.run(ctx, "cp", out, name+":"+taskMount); err != nil {
+		return fmt.Errorf("create out dir: %w", err)
+	}
+	return nil
+}
+
 // Run executes the full lifecycle: fresh volume → create → copy source in →
 // start → copy artifacts out → destroy. The container and volume are always
 // torn down, even on error or cancellation (disposability, §8.9).
@@ -138,6 +162,13 @@ func (r *PodmanRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 	// Copy source IN — Podman remaps ownership to the container uid.
 	if _, _, err := r.cmd.run(ctx, "cp", spec.SourceDir+"/.", name+":"+SrcPath); err != nil {
 		return Result{}, fmt.Errorf("copy source in: %w", err)
+	}
+
+	// Guarantee the drop-dir exists so the command can write artifacts and so
+	// collection is meaningful even if the command creates nothing — podman cp of
+	// a missing dir is a silent no-op, which would otherwise swallow that failure.
+	if err := r.seedOutDir(ctx, name); err != nil {
+		return Result{}, err
 	}
 
 	// Run. start -a exits with the container command's status.
