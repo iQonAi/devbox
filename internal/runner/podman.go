@@ -75,6 +75,10 @@ type execCommander struct {
 func (e execCommander) run(ctx context.Context, args ...string) (string, int, error) {
 	full := append(append([]string{}, e.base...), args...)
 	cmd := exec.CommandContext(ctx, full[0], full[1:]...)
+	// Run from a neutral, world-traversable dir: the cross-user hop inherits the
+	// caller's cwd, and agentbox cannot chdir into the daemon's home or /opt/devbox.
+	// Every path we pass podman is absolute, so cwd is irrelevant to correctness.
+	cmd.Dir = "/"
 	if e.env != nil {
 		cmd.Env = e.env
 	}
