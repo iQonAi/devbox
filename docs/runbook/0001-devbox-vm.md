@@ -587,3 +587,114 @@ created off `main`, and teardown removed it. The throwaway and its scratch dir
   gains real tasks to act on.
 - No operator-facing sync/worktree command yet — intentional; M1 is the library
   layer the controller calls.
+
+## M2 container runner + isolation (issue #10)
+
+Confirmed on the VM (verified 2026-07-30). The runner launches a disposable,
+isolated container per task via rootless Podman as `agentbox`, copies source in,
+runs the agent non-root under resource limits on the egress-restricted network,
+and collects a `git bundle` + logs out as inert data. gVisor (`runsc`) is the
+intended hardening layer but remains **validated-deferred to #17** (D5); M2 runs
+on the default `crun` runtime, and `Spec.Runtime` is the swap point.
+
+Everything below was proven by hand first (the #4 spike pattern), then encoded
+in `internal/runner` and re-verified through the Go runner.
+
+### Environment (Podman 3.4.4, cgroup v2)
+
+- Podman **3.4.4**, runtime **crun**, rootless network **slirp4netns** (as #4).
+- The base image `localhost/devbox-agent-base:dev` (#7) is in `agentbox`'s
+  rootless storage.
+- `agentbox` has `Linger=yes` so `/run/user/999` exists for rootless Podman.
+
+### Cgroup delegation (required for CPU/memory limits)
+
+On cgroup v2, non-root users get only `memory pids` delegated by default — **not
+`cpu`** — so `--cpus` fails with *"the requested cgroup controller `cpu` is not
+available"*. Delegate the controllers to every user manager:
+
+```bash
+sudo mkdir -p /etc/systemd/system/user@.service.d
+sudo tee /etc/systemd/system/user@.service.d/delegate.conf >/dev/null <<'DROP'
+[Service]
+Delegate=cpu cpuset io memory pids
+DROP
+sudo systemctl daemon-reload
+sudo systemctl restart user@999.service   # agentbox's user manager (uid 999)
+cat /sys/fs/cgroup/user.slice/user-999.slice/user@999.service/cgroup.controllers
+# want: cpuset cpu io memory pids
+```
+
+`user@999.service` is tied to `agentbox`'s uid; if that uid changes, so does the
+unit name.
+
+### Cross-user hop (daemon → agentbox)
+
+The daemon runs as `agent-taskd` (uid 998, owns the token/DB); containers must
+run as `agentbox` (uid 999) so #4's `iptables --uid-owner 999` egress deny-list
+applies automatically — slirp4netns opens the container's sockets as the owning
+uid. The daemon invokes Podman through a **root-owned wrapper** (which sets
+agentbox's rootless env) plus a **narrow sudoers rule**. Setting the env inside
+the wrapper — rather than `sudo … env HOME=… podman` — keeps the sudoers command
+match exact; allowing `env` in the rule would let any command through.
+
+```bash
+sudo tee /usr/local/sbin/agentbox-podman >/dev/null <<'WRAP'
+#!/bin/sh
+# Run podman as agentbox with its rootless environment.
+export HOME=/home/agentbox
+export XDG_RUNTIME_DIR=/run/user/999
+exec /usr/bin/podman "$@"
+WRAP
+sudo chown root:root /usr/local/sbin/agentbox-podman
+sudo chmod 0755 /usr/local/sbin/agentbox-podman
+
+sudo tee /etc/sudoers.d/agent-task-podman >/dev/null <<'SUDO'
+agent-taskd ALL=(agentbox) NOPASSWD: /usr/local/sbin/agentbox-podman
+qdrtech     ALL=(agentbox) NOPASSWD: /usr/local/sbin/agentbox-podman
+SUDO
+sudo chmod 0440 /etc/sudoers.d/agent-task-podman
+sudo visudo -cf /etc/sudoers.d/agent-task-podman   # must print: parsed OK
+```
+
+The `qdrtech` line exists only to run the integration tests as the operator;
+production uses the `agent-taskd` line. The runner pins its working directory to
+`/` because the hop inherits the caller's cwd and `agentbox` cannot `chdir` into
+the daemon's home or `/opt/devbox` (mode 0700); all Podman paths are absolute.
+
+### Transfer model (proven)
+
+`podman create → cp source in → cp empty out-dir in → start -a → cp artifacts
+out → rm` (container + volume, always). Podman **remaps ownership** on `cp` in
+and out, so the container sees the source as its own uid and the host reads the
+artifacts as `agentbox`. `cp` of a *missing* `/task/out` is a silent no-op on
+3.4.4, so the runner seeds an empty `/task/out` before start.
+
+### Validation (all confirmed through the Go runner)
+
+```bash
+cd /opt/devbox && git checkout feat/10-m2-container-runner
+RUNNER_PODMAN_BASE="sudo -u agentbox /usr/local/sbin/agentbox-podman" \
+  go test -tags integration ./internal/runner -v
+```
+
+- **Round trip** — source copied in, a commit made inside a non-root,
+  `--cap-drop ALL`, `no-new-privileges`, `--read-only` container, a
+  `base..HEAD` bundle written out, and the host verifying that bundle as inert
+  data (`git bundle verify`).
+- **Egress** — from inside the hardened container: public HTTP `200` and public
+  DNS resolve; `10.0.0.1` (and, hand-tested, all five denied ranges
+  `10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `169.254/16`) blocked.
+- **Memory limit** — allocating 1 GB under a 128 MB cap is OOM-killed (non-zero
+  exit), proving the limit is enforced, not swapped through.
+
+### Deferred (not this issue)
+
+- **#17:** flip `Spec.Runtime` to `runsc` (gVisor) once the spike validates its
+  interop with slirp4netns + the egress rules.
+- **M3:** the model API key crosses into the container by env at launch (must be
+  passed through Podman's environment, never argv); the agent adapter owns the
+  container command.
+- **M5:** the daemon drives the runner per task (lifecycle, the 30-min timeout via
+  the run context, container orphan sweep); the per-task out dir gains a
+  shared-group home so `agent-taskd` reads what `agentbox` wrote.
