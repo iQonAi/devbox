@@ -44,7 +44,9 @@ func openDir(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
 	}
-	if err := os.Chmod(d, 0o777); err != nil {
+	// Sticky (01777): agentbox can create files during the copy, but other
+	// users cannot delete/rename files they do not own on this multi-user VM.
+	if err := os.Chmod(d, 0o1777); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(d) })

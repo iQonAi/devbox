@@ -109,6 +109,22 @@ func TestRunTearsDownOnFailure(t *testing.T) {
 	}
 }
 
+// An unsafe or empty name must be rejected before any podman call, since it
+// gets embedded into container names and `podman cp` targets.
+func TestRunRejectsBadName(t *testing.T) {
+	for _, bad := range []string{"", "has space", "a:b", "a/b", "-leading"} {
+		f := &fakeCommander{}
+		spec := newSpec(t)
+		spec.Name = bad
+		if _, err := (&PodmanRunner{cmd: f}).Run(context.Background(), spec); err == nil {
+			t.Errorf("name %q was accepted, want rejection", bad)
+		}
+		if len(f.calls) != 0 {
+			t.Errorf("name %q: podman invoked before validation", bad)
+		}
+	}
+}
+
 // A copy-in failure must abort before the container is ever started.
 func TestRunAbortsIfCopyInFails(t *testing.T) {
 	f := &fakeCommander{failOn: SrcPath}

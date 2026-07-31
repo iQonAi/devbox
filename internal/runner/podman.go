@@ -8,9 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// validName constrains a task name: it becomes the container/volume name and is
+// embedded in `podman cp` targets, so only safe characters are allowed.
+var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 // buildCreateArgs returns the `podman create …` arguments for a spec, with every
 // isolation control applied. volume is the per-task named volume mounted at
@@ -58,10 +63,10 @@ func ContainerName(spec Spec) string {
 	return "agent-task-" + spec.Name
 }
 
-// commander runs one podman invocation and reports its exit code. A non-zero
-// exit is returned in code, NOT as err — err means the command could not be run
-// or was killed by the context. This split matters: a container that exits 1 is
-// a valid Result, not a runner failure.
+// commander runs one podman invocation. On any failure it returns a non-nil err
+// (carrying stderr); code is the process exit status, or -1 if it could not run.
+// Most callers just check err; `start` is the exception — a non-zero container
+// exit is a valid Result, so it keys off code and ignores a non-negative-code err.
 type commander interface {
 	run(ctx context.Context, args ...string) (stdout string, code int, err error)
 }
@@ -90,9 +95,13 @@ func (e execCommander) run(ctx context.Context, args ...string) (string, int, er
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			return out.String(), ee.ExitCode(), nil // ran; non-zero exit is not our error
+			// Ran but exited non-zero: report the code AND an error carrying
+			// stderr. Callers that treat a non-zero exit as legitimate (only
+			// `start`, for the container's own status) key off code, not err.
+			return out.String(), ee.ExitCode(),
+				fmt.Errorf("podman %s: exit %d: %s", strings.Join(args, " "), ee.ExitCode(), strings.TrimSpace(errb.String()))
 		}
-		return out.String(), -1, fmt.Errorf("podman %s: %w: %s", strings.Join(args, " "), err, errb.String())
+		return out.String(), -1, fmt.Errorf("podman %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
 	}
 	return out.String(), 0, nil
 }
@@ -122,11 +131,14 @@ func (r *PodmanRunner) seedOutDir(ctx context.Context, name string) error {
 	defer os.RemoveAll(parent)
 
 	out := filepath.Join(parent, "out")
-	if err := os.Mkdir(out, 0o777); err != nil {
+	if err := os.Mkdir(out, 0o755); err != nil {
 		return fmt.Errorf("seed out dir: %w", err)
 	}
-	_ = os.Chmod(parent, 0o777)
-	_ = os.Chmod(out, 0o777)
+	// agentbox reads (traverses) these during the copy; it needs r-x, not write.
+	// MkdirTemp makes parent 0700, so widen it to let agentbox in.
+	if err := os.Chmod(parent, 0o755); err != nil {
+		return fmt.Errorf("seed out dir perms: %w", err)
+	}
 
 	if _, _, err := r.cmd.run(ctx, "cp", out, name+":"+taskMount); err != nil {
 		return fmt.Errorf("create out dir: %w", err)
@@ -138,6 +150,12 @@ func (r *PodmanRunner) seedOutDir(ctx context.Context, name string) error {
 // start → copy artifacts out → destroy. The container and volume are always
 // torn down, even on error or cancellation (disposability, §8.9).
 func (r *PodmanRunner) Run(ctx context.Context, spec Spec) (Result, error) {
+	// Name is embedded into the container/volume name and into `podman cp`
+	// targets (name:/path); reject anything that could break that parsing.
+	if !validName.MatchString(spec.Name) {
+		return Result{}, fmt.Errorf("invalid task name %q: must match %s", spec.Name, validName)
+	}
+
 	name := ContainerName(spec)
 	volume := name
 
@@ -171,9 +189,11 @@ func (r *PodmanRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 		return Result{}, err
 	}
 
-	// Run. start -a exits with the container command's status.
+	// Run. start -a exits with the container command's status, so a non-zero
+	// exit (code >= 0) is a valid Result — only a negative code (podman itself
+	// failed to run/observe the container) is a runner error.
 	_, code, err := r.cmd.run(ctx, "start", "-a", name)
-	if err != nil {
+	if code < 0 {
 		return Result{}, fmt.Errorf("start container: %w", err)
 	}
 

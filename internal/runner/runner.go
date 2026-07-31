@@ -20,7 +20,7 @@ const (
 // Spec describes one task container. Only task-specific fields — the hardening
 // is applied unconditionally by the runner.
 type Spec struct {
-	Name      string   // Name of of the spec
+	Name      string   // task id; forms the container/volume name (safe chars only)
 	Image     string   // e.g. localhost/devbox-agent-base:dev
 	Cmd       []string // command run inside; writes artifacts to OutPath
 	SourceDir string   // host dir (a git repo) copied into SrcPath
