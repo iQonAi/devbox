@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -137,6 +138,17 @@ func runRun(args []string) error {
 	wd := *workDir
 	if wd == "" {
 		if wd, err = os.MkdirTemp("", "agent-run-"); err != nil {
+			return err
+		}
+	}
+	// The container runs as agentbox (a different uid), so it must read the
+	// source/prompt and write the out dir. M3 uses world-accessible scratch
+	// dirs; M5 replaces this with a shared group (see the runbook).
+	for _, d := range []string{wd, filepath.Join(wd, "out")} {
+		if err := os.MkdirAll(d, 0o777); err != nil {
+			return err
+		}
+		if err := os.Chmod(d, 0o777); err != nil {
 			return err
 		}
 	}
