@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -49,6 +50,14 @@ func buildCreateArgs(spec Spec, volume string) []string {
 	}
 	if spec.PidsLimit > 0 {
 		args = append(args, "--pids-limit", strconv.Itoa(spec.PidsLimit))
+	}
+
+	// Forward env by NAME only: podman reads the value from its own environment,
+	// so the secret (model key) never appears in argv. Sorted for determinism.
+	names := append([]string(nil), spec.PassEnv...)
+	sort.Strings(names)
+	for _, name := range names {
+		args = append(args, "-e", name)
 	}
 
 	// Image and command come last, in that order.
@@ -180,6 +189,14 @@ func (r *PodmanRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 	// Copy source IN — Podman remaps ownership to the container uid.
 	if _, _, err := r.cmd.run(ctx, "cp", spec.SourceDir+"/.", name+":"+SrcPath); err != nil {
 		return Result{}, fmt.Errorf("copy source in: %w", err)
+	}
+
+	// Copy the prompt in as a discrete artifact (read-only by convention; the
+	// agent reads it, the wrapper never lets the agent write it).
+	if spec.PromptFile != "" {
+		if _, _, err := r.cmd.run(ctx, "cp", spec.PromptFile, name+":"+PromptPath); err != nil {
+			return Result{}, fmt.Errorf("copy prompt in: %w", err)
+		}
 	}
 
 	// Guarantee the drop-dir exists so the command can write artifacts and so

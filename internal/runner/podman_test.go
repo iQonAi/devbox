@@ -3,6 +3,7 @@ package runner
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -73,6 +74,22 @@ func TestBuildCreateArgsImageAndCmdLast(t *testing.T) {
 	tail := args[len(args)-4:]
 	if !slices.Equal(tail, []string{"img", "bash", "-c", "true"}) {
 		t.Errorf("image+cmd not last: %v", tail)
+	}
+}
+
+// Env is forwarded by NAME only — never NAME=VALUE — so the value stays out of
+// argv. Names are sorted for deterministic output.
+func TestBuildCreateArgsPassEnvNamesOnly(t *testing.T) {
+	args := buildCreateArgs(Spec{Image: "img", PassEnv: []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}}, "v")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-e ANTHROPIC_API_KEY -e CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("env not forwarded by sorted name: %q", joined)
+	}
+	// The forwarded names must never carry a value in argv.
+	for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if strings.Contains(joined, name+"=") {
+			t.Errorf("secret value leaked into argv for %s", name)
+		}
 	}
 }
 

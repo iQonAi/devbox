@@ -263,3 +263,45 @@ func TestUpdateTaskStateUnknown(t *testing.T) {
 		t.Fatal("expected an error for unknown task, got nil")
 	}
 }
+
+func TestArtifacts(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	repoID := seedRepo(t, s)
+	if err := s.CreateTask(NewTask{ID: "task-1", RepoID: repoID, Source: "task"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	for _, a := range []struct{ kind, path string }{
+		{"bundle", "/out/changes.bundle"},
+		{"transcript", "/out/transcript.json"},
+		{"diff", "/out/diff.patch"},
+	} {
+		if err := s.InsertArtifact("task-1", a.kind, a.path); err != nil {
+			t.Fatalf("insert %s: %v", a.kind, err)
+		}
+	}
+
+	arts, err := s.ListArtifacts("task-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(arts) != 3 || arts[0].Kind != "bundle" || arts[2].Kind != "diff" {
+		t.Fatalf("got %+v, want bundle/transcript/diff in order", arts)
+	}
+}
+
+// An artifact for a non-existent task must be rejected (FK on).
+func TestArtifactBadTaskFails(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InsertArtifact("nope", "bundle", "/x"); err == nil {
+		t.Fatal("expected FK violation for unknown task, got nil")
+	}
+}
