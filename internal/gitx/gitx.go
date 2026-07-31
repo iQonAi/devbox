@@ -26,8 +26,10 @@ func Run(ctx context.Context, dir string, args ...string) (string, error) {
 // is world-readable, so a token in an argument is a token leaked to every user
 // on the host
 func RunEnv(ctx context.Context, dir string, extraEnv []string, args ...string) (string, error) {
-	// -c flags come before the subcommand
-	full := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
+	// -c flags come before the subcommand. gc.auto=0 stops git from forking a
+	// background "gc --auto" that would mutate these ephemeral mirrors/worktrees
+	// mid-task (and outlive short-lived operations, racing their cleanup).
+	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0"}, args...)
 
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
