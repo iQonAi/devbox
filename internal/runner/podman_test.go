@@ -1,9 +1,9 @@
 package runner
 
 import (
+	"os"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -20,7 +20,7 @@ func TestBuildCreateArgsHardening(t *testing.T) {
 	args := buildCreateArgs(Spec{
 		Image: "img", Cmd: []string{"echo", "hi"},
 		CPUs: "2", MemoryMB: 2048, PidsLimit: 256,
-	}, "vol-1")
+	}, "vol-1", "")
 
 	// Non-negotiable isolation flags must always be present.
 	if argAfter(args, "--user") != containerUser {
@@ -47,7 +47,7 @@ func TestBuildCreateArgsHardening(t *testing.T) {
 }
 
 func TestBuildCreateArgsLimits(t *testing.T) {
-	args := buildCreateArgs(Spec{Image: "img", CPUs: "2", MemoryMB: 2048, PidsLimit: 256}, "v")
+	args := buildCreateArgs(Spec{Image: "img", CPUs: "2", MemoryMB: 2048, PidsLimit: 256}, "v", "")
 	if argAfter(args, "--cpus") != "2" {
 		t.Errorf("--cpus = %q", argAfter(args, "--cpus"))
 	}
@@ -61,7 +61,7 @@ func TestBuildCreateArgsLimits(t *testing.T) {
 
 // Unset limits must be omitted, not passed as zero (which Podman rejects).
 func TestBuildCreateArgsOmitsUnsetLimits(t *testing.T) {
-	args := buildCreateArgs(Spec{Image: "img"}, "v")
+	args := buildCreateArgs(Spec{Image: "img"}, "v", "")
 	for _, flag := range []string{"--cpus", "--memory", "--pids-limit", "--runtime"} {
 		if slices.Contains(args, flag) {
 			t.Errorf("%s should be omitted when unset", flag)
@@ -70,31 +70,48 @@ func TestBuildCreateArgsOmitsUnsetLimits(t *testing.T) {
 }
 
 func TestBuildCreateArgsImageAndCmdLast(t *testing.T) {
-	args := buildCreateArgs(Spec{Image: "img", Cmd: []string{"bash", "-c", "true"}}, "v")
+	args := buildCreateArgs(Spec{Image: "img", Cmd: []string{"bash", "-c", "true"}}, "v", "")
 	tail := args[len(args)-4:]
 	if !slices.Equal(tail, []string{"img", "bash", "-c", "true"}) {
 		t.Errorf("image+cmd not last: %v", tail)
 	}
 }
 
-// Env is forwarded by NAME only — never NAME=VALUE — so the value stays out of
-// argv. Names are sorted for deterministic output.
-func TestBuildCreateArgsPassEnvNamesOnly(t *testing.T) {
-	args := buildCreateArgs(Spec{Image: "img", PassEnv: []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}}, "v")
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-e ANTHROPIC_API_KEY -e CLAUDE_CODE_OAUTH_TOKEN") {
-		t.Errorf("env not forwarded by sorted name: %q", joined)
+// Secret env is delivered via --env-file: only the file path appears in argv.
+func TestBuildCreateArgsEnvFile(t *testing.T) {
+	args := buildCreateArgs(Spec{Image: "img"}, "v", "/tmp/agent-env-xyz/env")
+	if argAfter(args, "--env-file") != "/tmp/agent-env-xyz/env" {
+		t.Errorf("env file not passed: %v", args)
 	}
-	// The forwarded names must never carry a value in argv.
-	for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
-		if strings.Contains(joined, name+"=") {
-			t.Errorf("secret value leaked into argv for %s", name)
-		}
+	// No secret file when none is provided.
+	none := buildCreateArgs(Spec{Image: "img"}, "v", "")
+	if slices.Contains(none, "--env-file") {
+		t.Error("--env-file present with no secret env")
+	}
+}
+
+// The runner writes name=value to a file so values never touch argv.
+func TestWriteEnvFile(t *testing.T) {
+	path, cleanup, err := writeEnvFile(map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "secret-value"})
+	if err != nil {
+		t.Fatalf("writeEnvFile: %v", err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got := string(data); got != "CLAUDE_CODE_OAUTH_TOKEN=secret-value\n" {
+		t.Errorf("env file = %q", got)
+	}
+	// Empty map → no file, no-op cleanup.
+	if p, _, _ := writeEnvFile(nil); p != "" {
+		t.Errorf("expected empty path for no secret env, got %q", p)
 	}
 }
 
 func TestBuildCreateArgsRuntimeSwap(t *testing.T) {
-	args := buildCreateArgs(Spec{Image: "img", Runtime: "runsc"}, "v")
+	args := buildCreateArgs(Spec{Image: "img", Runtime: "runsc"}, "v", "")
 	if argAfter(args, "--runtime") != "runsc" {
 		t.Error("runtime swap point not honored")
 	}

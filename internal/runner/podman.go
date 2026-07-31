@@ -22,7 +22,7 @@ var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 // isolation control applied. volume is the per-task named volume mounted at
 // /task. This is pure and deterministic (flags in a fixed order) so it can be
 // asserted in tests without invoking Podman.
-func buildCreateArgs(spec Spec, volume string) []string {
+func buildCreateArgs(spec Spec, volume, envFile string) []string {
 	args := []string{
 		"create",
 		"--name", ContainerName(spec),
@@ -52,12 +52,10 @@ func buildCreateArgs(spec Spec, volume string) []string {
 		args = append(args, "--pids-limit", strconv.Itoa(spec.PidsLimit))
 	}
 
-	// Forward env by NAME only: podman reads the value from its own environment,
-	// so the secret (model key) never appears in argv. Sorted for determinism.
-	names := append([]string(nil), spec.PassEnv...)
-	sort.Strings(names)
-	for _, name := range names {
-		args = append(args, "-e", name)
+	// Secret env is delivered via a file: the value stays out of argv (only the
+	// file path appears there). Written and removed by Run.
+	if envFile != "" {
+		args = append(args, "--env-file", envFile)
 	}
 
 	// Image and command come last, in that order.
@@ -129,6 +127,44 @@ func NewPodmanRunner(base, env []string) *PodmanRunner {
 	return &PodmanRunner{cmd: execCommander{base: base, env: env}}
 }
 
+// writeEnvFile writes name=value lines to a temp file for `podman --env-file`,
+// keeping secret values out of argv. Returns the path and a cleanup func; the
+// path is "" (and cleanup a no-op) when there is no secret env. The file is
+// world-readable so agentbox (the podman user) can read it across the uid
+// boundary — acceptable on the single-user host; M5 narrows it to a shared group.
+func writeEnvFile(env map[string]string) (string, func(), error) {
+	noop := func() {}
+	if len(env) == 0 {
+		return "", noop, nil
+	}
+	dir, err := os.MkdirTemp("", "agent-env-")
+	if err != nil {
+		return "", noop, fmt.Errorf("env file dir: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+	if err := os.Chmod(dir, 0o755); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("env file dir perms: %w", err)
+	}
+
+	names := make([]string, 0, len(env))
+	for k := range env {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, k := range names {
+		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
+	}
+
+	path := filepath.Join(dir, "env")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("write env file: %w", err)
+	}
+	return path, cleanup, nil
+}
+
 // seedOutDir creates an empty /task/out inside the container by copying an empty
 // host dir named "out" into /task. The seed dir is world-accessible because in
 // production agentbox (not this process) reads it during the copy.
@@ -182,7 +218,15 @@ func (r *PodmanRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 		r.cmd.run(context.Background(), "volume", "rm", "-f", volume)
 	}()
 
-	if _, _, err := r.cmd.run(ctx, buildCreateArgs(spec, volume)...); err != nil {
+	// Deliver secret env via a file so the value never enters argv. Removed as
+	// soon as the container is created (podman has read it into the config).
+	envFile, cleanupEnv, err := writeEnvFile(spec.SecretEnv)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanupEnv()
+
+	if _, _, err := r.cmd.run(ctx, buildCreateArgs(spec, volume, envFile)...); err != nil {
 		return Result{}, fmt.Errorf("create container: %w", err)
 	}
 

@@ -26,9 +26,9 @@ type Spec struct {
 	Cmd        []string // command run inside; writes artifacts to OutPath
 	SourceDir  string   // host dir (a git repo) copied into SrcPath
 	PromptFile string   // host file copied read-only to /task/prompt.md; "" = none
-	OutDir     string   // host dir where artifacts are collected OUT (must be runner-writable)
-	PassEnv    []string // env var NAMES forwarded into the container (-e NAME); values
-	//            travel in podman's environment, never argv (for the model key)
+	OutDir    string            // host dir where artifacts are collected OUT (must be runner-writable)
+	SecretEnv map[string]string // name→value; written to an --env-file so the value
+	//                             (the model key) never appears in argv
 	CPUs      string // e.g. "2"; empty = unset
 	MemoryMB  int    // e.g. 2048; 0 = unset
 	PidsLimit int    // e.g. 256; 0 = unset

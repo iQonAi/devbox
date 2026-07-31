@@ -133,6 +133,12 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 		return Outcome{}, err
 	}
 
+	// 5. Provide the model credential by env-file (value never in argv).
+	secretEnv := map[string]string{}
+	if req.AuthValue != "" {
+		secretEnv[envVar] = req.AuthValue
+	}
+
 	outDir := filepath.Join(req.WorkDir, "out")
 	spec := runner.Spec{
 		Name:       req.TaskID,
@@ -140,20 +146,11 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 		SourceDir:  exportDir,
 		PromptFile: promptPath,
 		OutDir:     outDir,
-		PassEnv:    []string{envVar},
+		SecretEnv:  secretEnv,
 		Cmd:        wrapperCmd(base, agentCmd),
 		CPUs:       req.Limits.CPUs,
 		MemoryMB:   req.Limits.MemoryMB,
 		PidsLimit:  req.Limits.PidsLimit,
-	}
-
-	// 5. Provide the model credential by env. M3 is single-run, so setting it in
-	// this process's environment is safe; M5 (concurrency) will pass it per-run.
-	if req.AuthValue != "" {
-		if err := os.Setenv(envVar, req.AuthValue); err != nil {
-			return Outcome{}, fmt.Errorf("set model credential env: %w", err)
-		}
-		defer os.Unsetenv(envVar)
 	}
 
 	// 6. Enforce the wall-clock timeout via the run context (§7.4).
