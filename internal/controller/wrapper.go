@@ -29,5 +29,9 @@ fi
 printf '%%s\n' "$AGENT_EXIT" > %[2]s/agent.exit
 exit "$AGENT_EXIT"
 `, runner.SrcPath, runner.OutPath, agentCmd, base)
-	return []string{"bash", "-lc", script}
+	// bash -c, NOT -lc: a login shell sources /etc/profile and ~/.profile, but
+	// the container runs with HOME=/task (no profile there), so -l resets PATH
+	// and drops /home/agent/.local/bin where the agent CLIs live. -c inherits
+	// the image's ENV PATH intact.
+	return []string{"bash", "-c", script}
 }
