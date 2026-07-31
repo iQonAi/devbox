@@ -698,3 +698,89 @@ RUNNER_PODMAN_BASE="sudo -u agentbox /usr/local/sbin/agentbox-podman" \
 - **M5:** the daemon drives the runner per task (lifecycle, the 30-min timeout via
   the run context, container orphan sweep); the per-task out dir gains a
   shared-group home so `agent-taskd` reads what `agentbox` wrote.
+
+## M3 Claude Code adapter — first end-to-end agent run (issue #11)
+
+Confirmed on the VM (verified 2026-07-31). A real agent run: prompt → sync →
+feature worktree → standalone source export → agent in the isolated container →
+`git bundle` out → applied onto the host feature branch → artifacts. M3 stops at
+"commits on the feature branch"; host push, the templated PR, and the GitHub
+token are M4, and the daemon/worker-pool path is M5. The only new secret is the
+**model key**; **no GitHub token is used anywhere in M3**.
+
+### Model auth (both modes supported)
+
+The agent adapter maps an auth method to an env var: subscription →
+`CLAUDE_CODE_OAUTH_TOKEN`, api_key → `ANTHROPIC_API_KEY`. For a Claude
+subscription, mint a one-year token on a machine with a browser:
+
+```bash
+claude setup-token         # prints the token; copy it
+```
+
+Store it on the VM as a 0600 file (kept out of shell history):
+
+```bash
+install -m 600 /dev/null ~/.claude-token
+cat > ~/.claude-token      # paste, Enter, Ctrl-D
+```
+
+### Running a task
+
+Standalone, in-process (`agent-task run`). The container runs as `agentbox`, so
+scratch dirs are made agentbox-accessible; `--podman` injects the cross-user
+wrapper; `--data-dir`/`--work-dir` are operator-writable paths (the daemon uses
+its `StateDirectory` in M5).
+
+```bash
+/tmp/agent-task run \
+  --agent claude --auth subscription \
+  --repo-url file:///tmp/m3-testrepo --default-branch main \
+  --task "Add a subtract(a, b) function to src/hello.py that returns a - b." \
+  --podman "sudo -u agentbox /usr/local/sbin/agentbox-podman" \
+  --data-dir /tmp/m3-data --work-dir /tmp/m3-work \
+  --model-token-file ~/.claude-token
+```
+
+### Two findings that only surfaced on the real VM
+
+- **`bash -c`, not `bash -lc`.** The container sets `HOME=/task`; a login shell
+  sources `/etc/profile` and a non-existent `/task/.profile`, resetting `PATH`
+  and dropping `/home/agent/.local/bin` where the agent CLIs live (agent came
+  back exit 127). Non-login `-c` inherits the image's `ENV PATH`.
+- **Model key via `--env-file`, not `podman -e NAME`.** Podman 3.4.4 did not
+  forward the token with `-e NAME` pass-through, and sudo `env_keep` across the
+  hop was unreliable, so Claude saw an empty token ("Not logged in"). The runner
+  now writes `name=value` to a temp file and passes `--env-file <path>` — the
+  value is in the file, only the path is in argv, and the file is removed once
+  the container is created. (The earlier `env_keep` sudoers line is therefore no
+  longer required.)
+
+### Validation (confirmed)
+
+- **Mock agent** (`--agent mock`, no token): `Completed`, 1 commit on the
+  feature branch — proves the whole container pipeline (copy-in as agentbox,
+  commit inside, bundle out, apply) cross-user.
+- **Claude, subscription auth:** the agent added `subtract(a, b)` to
+  `src/hello.py`, kept `hello()`, and committed
+  (`Add subtract(a, b) function to hello.py`) on
+  `agent/claude/<slug>-<id>`. Artifacts collected: transcript (json), summary,
+  run log, diff, bundle.
+- **Token isolation:** delivered by `--env-file` (never argv); no GitHub token
+  present in the container.
+
+### OQ-4 — source-copy cost
+
+The export is a full `--no-hardlinks --single-branch` clone at the base commit,
+so its size (and copy time) scales with repo size. Data point: the trivial test
+repo produced a **204 KB** export. Negligible here; for a large monorepo this is
+the cost to watch — revisit per OQ-4 (shallow/partial-clone options) before
+onboarding big repos.
+
+### Deferred
+
+- **M4:** issue fetch → prompt (`--issue`); host push + templated PR; the
+  machine-user repo-scoped GitHub token via `LoadCredential`.
+- **M5:** daemon-driven runs (worker pool, cancellation, the 30-min timeout,
+  restart recovery); the model key delivered via `LoadCredential` and the run
+  scratch/out dirs moved to a shared-group home instead of world-accessible.
