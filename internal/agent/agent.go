@@ -23,7 +23,7 @@ type Agent interface {
 	// EnvVar returns the environment variable the agent reads its model
 	// credential from, under the given auth method.
 	EnvVar(method AuthMethod) (string, error)
-	// Command returns a shell snippet — run via `bash -lc` with the source repo
+	// Command returns a shell snippet — run via `bash -c`, with the source repo
 	// as the working directory — that runs the agent non-interactively against
 	// the prompt at promptPath and writes its transcript to transcriptPath. It
 	// must exit non-zero when the agent fails.

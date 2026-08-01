@@ -72,13 +72,14 @@ type Outcome struct {
 	Artifacts []Artifact
 }
 
-// artifactKinds maps a produced filename to its artifact kind.
-var artifactKinds = map[string]string{
-	"changes.bundle":  "bundle",
-	"transcript.json": "transcript",
-	"diff.patch":      "diff",
-	"run.log":         "log",
-	"summary.txt":     "summary",
+// artifactKinds maps a produced filename to its artifact kind, in a fixed order
+// so collection is deterministic (stable CLI output and insertion order).
+var artifactKinds = []struct{ name, kind string }{
+	{"changes.bundle", "bundle"},
+	{"transcript.json", "transcript"},
+	{"diff.patch", "diff"},
+	{"run.log", "log"},
+	{"summary.txt", "summary"},
 }
 
 // Run executes the task. It returns an Outcome (with a terminal State) on a
@@ -198,10 +199,10 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 // collectArtifacts classifies the files a run left in outDir.
 func collectArtifacts(outDir string) []Artifact {
 	var arts []Artifact
-	for name, kind := range artifactKinds {
-		p := filepath.Join(outDir, name)
+	for _, a := range artifactKinds {
+		p := filepath.Join(outDir, a.name)
 		if _, err := os.Stat(p); err == nil {
-			arts = append(arts, Artifact{Kind: kind, Path: p})
+			arts = append(arts, Artifact{Kind: a.kind, Path: p})
 		}
 	}
 	return arts

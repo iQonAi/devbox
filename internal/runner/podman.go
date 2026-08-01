@@ -218,16 +218,17 @@ func (r *PodmanRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 		r.cmd.run(context.Background(), "volume", "rm", "-f", volume)
 	}()
 
-	// Deliver secret env via a file so the value never enters argv. Removed as
-	// soon as the container is created (podman has read it into the config).
+	// Deliver secret env via a file so the value never enters argv, and remove it
+	// the instant create returns — podman has read it into the container config,
+	// so the on-disk exposure is only that one call, success or failure.
 	envFile, cleanupEnv, err := writeEnvFile(spec.SecretEnv)
 	if err != nil {
 		return Result{}, err
 	}
-	defer cleanupEnv()
-
-	if _, _, err := r.cmd.run(ctx, buildCreateArgs(spec, volume, envFile)...); err != nil {
-		return Result{}, fmt.Errorf("create container: %w", err)
+	_, _, createErr := r.cmd.run(ctx, buildCreateArgs(spec, volume, envFile)...)
+	cleanupEnv()
+	if createErr != nil {
+		return Result{}, fmt.Errorf("create container: %w", createErr)
 	}
 
 	// Copy source IN — Podman remaps ownership to the container uid.

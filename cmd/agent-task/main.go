@@ -133,6 +133,10 @@ func runRun(args []string) error {
 			return fmt.Errorf("read model token: %w", err)
 		}
 		authValue = strings.TrimSpace(string(b))
+	} else if envVar, verr := ag.EnvVar(agent.AuthMethod(*authStr)); verr == nil {
+		// No token file: inherit from the agent's env var (e.g. the operator
+		// exported CLAUDE_CODE_OAUTH_TOKEN), as the flag help promises.
+		authValue = os.Getenv(envVar)
 	}
 
 	wd := *workDir
