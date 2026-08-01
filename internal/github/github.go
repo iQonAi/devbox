@@ -78,15 +78,18 @@ func parseIssue(jsonStr string) (prompt.Issue, error) {
 	return prompt.Issue{Number: raw.Number, Title: raw.Title, Body: raw.Body, URL: raw.URL}, nil
 }
 
-// Push pushes the feature branch to origin using the token via a credential
-// helper (never in argv or written to .git/config). The worktree's origin is
-// the repo's HTTPS URL from the mirror clone. All git runs hook-disabled (gitx).
+// Push pushes the feature branch using the token via a credential helper (never
+// in argv or written to .git/config). It pushes to the explicit repo URL rather
+// than the `origin` remote: the mirror clone sets remote.origin.mirror=true,
+// which rejects a single-branch refspec ("--mirror can't be combined with
+// refspecs"). All git runs hook-disabled (gitx).
 func (c *Client) Push(ctx context.Context, worktreeDir, branch string) error {
+	url := fmt.Sprintf("https://github.com/%s/%s.git", c.owner, c.repo)
 	env := []string{tokenEnvVar + "=" + c.token}
 	args := []string{
 		"-c", "credential.helper=",
 		"-c", "credential.helper=" + credentialHelper,
-		"push", "origin", branch,
+		"push", url, branch,
 	}
 	if _, err := gitx.RunEnv(ctx, worktreeDir, env, args...); err != nil {
 		return fmt.Errorf("push %s: %w", branch, err)
