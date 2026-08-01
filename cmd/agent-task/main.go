@@ -74,10 +74,12 @@ func runRun(args []string) error {
 	repoName := fs.String("repo", "", "registered repo name (from config); or use --repo-url")
 	repoURL := fs.String("repo-url", "", "source repo URL (file:// or https://); overrides the registry")
 	defaultBranch := fs.String("default-branch", "", "default branch (default: registry value or 'main')")
-	taskText := fs.String("task", "", "free-form task text (required; --issue lands in M4)")
+	taskText := fs.String("task", "", "free-form task text (or use --issue)")
+	issueNum := fs.Int("issue", 0, "GitHub issue number to render into the prompt (needs --repo + token)")
 	agentName := fs.String("agent", "claude", "agent adapter: claude|mock")
 	authStr := fs.String("auth", "subscription", "auth method: subscription|api_key")
 	tokenFile := fs.String("model-token-file", "", "file holding the model token; else inherit the agent's env var")
+	ghTokenFile := fs.String("github-token-file", "", "file holding the repo-scoped GitHub token; else inherit GH_TOKEN")
 	image := fs.String("image", "localhost/devbox-agent-base:dev", "agent base image")
 	podman := fs.String("podman", "podman", "podman command, e.g. 'sudo -u agentbox /usr/local/sbin/agentbox-podman'")
 	dataDir := fs.String("data-dir", "", "mirror cache dir (default: config data_dir)")
@@ -86,15 +88,15 @@ func runRun(args []string) error {
 		return err
 	}
 
-	if *taskText == "" {
-		return fmt.Errorf("--task is required")
+	if *taskText == "" && *issueNum == 0 {
+		return fmt.Errorf("one of --task or --issue is required")
 	}
 	if *repoURL == "" && *repoName == "" {
 		return fmt.Errorf("one of --repo or --repo-url is required")
 	}
 
-	rName, rURL, rBranch, rTokenRef := *repoName, *repoURL, *defaultBranch, ""
-	rOwner, rRepo := "", ""
+	rName, rURL, rBranch := *repoName, *repoURL, *defaultBranch
+	rOwner, rRepo, rTokenRef := "", "", ""
 	if *repoName != "" && *repoURL == "" {
 		cfg, err := config.Load(*configPath)
 		if err != nil {
@@ -111,8 +113,7 @@ func runRun(args []string) error {
 			return fmt.Errorf("repo %q is not in the registry", *repoName)
 		}
 		rURL = fmt.Sprintf("https://github.com/%s/%s.git", found.Owner, found.Repo)
-		rOwner, rRepo = found.Owner, found.Repo
-		rTokenRef = found.TokenRef
+		rOwner, rRepo, rTokenRef = found.Owner, found.Repo, found.TokenRef
 		if rBranch == "" {
 			rBranch = found.DefaultBranch
 		}
@@ -122,6 +123,20 @@ func runRun(args []string) error {
 	}
 	if rBranch == "" {
 		rBranch = "main"
+	}
+
+	// The repo-scoped GitHub token (D3): from a file, else inherit GH_TOKEN. Used
+	// host-only for the private clone, push, PR, and issue fetch.
+	ghToken := os.Getenv("GH_TOKEN")
+	if *ghTokenFile != "" {
+		b, err := os.ReadFile(*ghTokenFile)
+		if err != nil {
+			return fmt.Errorf("read github token: %w", err)
+		}
+		ghToken = strings.TrimSpace(string(b))
+	}
+	if *issueNum > 0 && (ghToken == "" || rOwner == "") {
+		return fmt.Errorf("--issue needs a GitHub token (--github-token-file/GH_TOKEN) and --repo")
 	}
 
 	ag, err := agent.Lookup(*agentName)
@@ -175,11 +190,14 @@ func runRun(args []string) error {
 	}
 	req := controller.Request{
 		TaskID:        fmt.Sprintf("t%d", time.Now().UnixNano()),
-		Title:         *taskText,
+		Title:         *taskText, // "" for --issue; the controller uses the issue title
 		RepoName:      rName,
 		RepoURL:       rURL,
+		Owner:         rOwner,
+		Repo:          rRepo,
 		DefaultBranch: rBranch,
-		TokenRef:      rTokenRef,
+		IssueNumber:   *issueNum,
+		GitHubToken:   ghToken,
 		Prompt:        prompt.Input{Task: *taskText},
 		Agent:         ag,
 		AuthMethod:    agent.AuthMethod(*authStr),
@@ -198,6 +216,9 @@ func runRun(args []string) error {
 	fmt.Printf("exit:     %d\n", out.ExitCode)
 	fmt.Printf("branch:   %s\n", out.Branch)
 	fmt.Printf("worktree: %s\n", out.Worktree)
+	if out.PRURL != "" {
+		fmt.Printf("pr:       %s\n", out.PRURL)
+	}
 	for _, a := range out.Artifacts {
 		fmt.Printf("artifact: %-10s %s\n", a.Kind, a.Path)
 	}
@@ -237,6 +258,11 @@ func runRun(args []string) error {
 	}
 	for _, a := range out.Artifacts {
 		if err := st.InsertArtifact(req.TaskID, a.Kind, a.Path); err != nil {
+			return err
+		}
+	}
+	if out.PRURL != "" {
+		if err := st.SetTaskPRURL(req.TaskID, out.PRURL); err != nil {
 			return err
 		}
 	}

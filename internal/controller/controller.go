@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/iQonAi/devbox/internal/agent"
+	"github.com/iQonAi/devbox/internal/github"
 	"github.com/iQonAi/devbox/internal/prompt"
 	"github.com/iQonAi/devbox/internal/repo"
 	"github.com/iQonAi/devbox/internal/runner"
@@ -43,11 +45,14 @@ type Deps struct {
 // Request is one task to run.
 type Request struct {
 	TaskID        string
-	Title         string // used for the feature-branch slug
+	Title         string // used for the feature-branch slug (issue title when --issue)
 	RepoName      string
 	RepoURL       string
+	Owner         string // GitHub owner, for issue fetch / push / PR
+	Repo          string // GitHub repo name
 	DefaultBranch string
-	TokenRef      string // mirror auth (M4); "" for local/public
+	IssueNumber   int    // > 0 to render the prompt from an issue (D8 --issue)
+	GitHubToken   string // host-only repo-scoped token (D3); "" = no GitHub, anon clone
 	Prompt        prompt.Input
 	Agent         agent.Agent
 	AuthMethod    agent.AuthMethod
@@ -71,6 +76,7 @@ type Outcome struct {
 	Branch    string
 	Worktree  string
 	OutDir    string
+	PRURL     string // set when a PR was opened (M4)
 	Artifacts []Artifact
 }
 
@@ -92,8 +98,35 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("no agent specified")
 	}
 
+	// A GitHub client (host-only, D3) is available when a token + owner/repo are
+	// set. The controller only calls its methods — it never puts the token into
+	// the runner Spec, so the token cannot reach the container.
+	var gh *github.Client
+	if req.GitHubToken != "" && req.Owner != "" && req.Repo != "" {
+		gh = github.New(req.Owner, req.Repo, req.GitHubToken)
+	}
+
+	// 0. Resolve the prompt input and an effective title (issue or free-form).
+	promptInput := req.Prompt
+	title := req.Title
+	issueURL := ""
+	if req.IssueNumber > 0 {
+		if gh == nil {
+			return Outcome{}, fmt.Errorf("--issue requires a GitHub token and owner/repo")
+		}
+		issue, err := gh.FetchIssue(ctx, req.IssueNumber)
+		if err != nil {
+			return Outcome{}, err
+		}
+		promptInput = prompt.Input{Issue: &issue}
+		issueURL = issue.URL
+		if title == "" {
+			title = issue.Title
+		}
+	}
+
 	// 1. Render the prompt to a host file.
-	promptText, err := prompt.Render(req.Prompt)
+	promptText, err := prompt.Render(promptInput)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -106,11 +139,11 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 	}
 
 	// 2. Sync the mirror and create the feature-branch worktree.
-	mirror, err := deps.Repo.Sync(ctx, req.RepoName, req.RepoURL, req.TokenRef)
+	mirror, err := deps.Repo.Sync(ctx, req.RepoName, req.RepoURL, req.GitHubToken)
 	if err != nil {
 		return Outcome{}, err
 	}
-	branch := repo.BranchName(req.Agent.Name(), req.Title, req.TaskID)
+	branch := repo.BranchName(req.Agent.Name(), title, req.TaskID)
 	wt, err := deps.Repo.AddWorktree(ctx, mirror, req.TaskID, branch, req.DefaultBranch)
 	if err != nil {
 		return Outcome{}, err
@@ -210,12 +243,54 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 	}
 
 	// 8. Terminal outcome (D9): Completed iff the agent exited 0 AND ≥1 commit.
-	if res.ExitCode == 0 && out.Commits >= 1 {
-		out.State = StateCompleted
-	} else {
+	if res.ExitCode != 0 || out.Commits < 1 {
 		out.State = StateFailed
+		return out, nil
+	}
+	out.State = StateCompleted
+
+	// 9. Publish (Completed only): push the branch and open a PR (§9.3). A
+	// publish failure downgrades the task to Failed with the reason; the commits
+	// remain on the local feature branch for inspection.
+	if gh != nil {
+		if err := gh.Push(ctx, wt.Path, branch); err != nil {
+			out.State, out.Error = StateFailed, "push: "+err.Error()
+			return out, nil
+		}
+		prTitle := title
+		if prTitle == "" {
+			prTitle = req.TaskID
+		}
+		body := github.BuildPRBody(github.PRInfo{
+			TaskID: req.TaskID, Agent: req.Agent.Name(), IssueURL: issueURL,
+			Summary: readArtifact(outDir, "summary.txt"),
+		})
+		url, err := gh.OpenPR(ctx, branch, req.DefaultBranch, prTitle, body)
+		if err != nil {
+			out.State, out.Error = StateFailed, "open pr: "+err.Error()
+			return out, nil
+		}
+		out.PRURL = url
+		if req.IssueNumber > 0 {
+			// Best-effort back-link; a comment failure must not fail the task.
+			_ = gh.CommentIssue(ctx, req.IssueNumber, "Agent-produced PR: "+url)
+		}
 	}
 	return out, nil
+}
+
+// readArtifact returns the trimmed contents of outDir/name, or "" if absent or
+// unreadable. Only regular files are read (never a symlinked artifact).
+func readArtifact(outDir, name string) string {
+	p := filepath.Join(outDir, name)
+	if fi, err := os.Lstat(p); err != nil || !fi.Mode().IsRegular() {
+		return ""
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // collectArtifacts classifies the files a run left in outDir. Only regular

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/iQonAi/devbox/internal/creds"
 	"github.com/iQonAi/devbox/internal/gitx"
 	"github.com/iQonAi/devbox/internal/store"
 )
@@ -42,14 +41,14 @@ func (m *Manager) MirrorPath(name string) string {
 }
 
 // Sync ensures a bare mirror of url exists for name and is current, returning
-// it's path. Safe to call repeately: the first call clones, later one fetch.
-func (m *Manager) Sync(ctx context.Context, name, url, tokenRef string) (string, error) {
+// its path. Safe to call repeatedly: the first call clones, later ones fetch.
+// token is the raw credential (empty = anonymous); the caller resolves it, so
+// repo has no dependency on how credentials are stored (D3 keeps the token out
+// of the container regardless).
+func (m *Manager) Sync(ctx context.Context, name, url, token string) (string, error) {
 	path := m.MirrorPath(name)
 
-	authArgs, env, err := auth(tokenRef)
-	if err != nil {
-		return "", err
-	}
+	authArgs, env := auth(token)
 
 	// HEAD, not the directory: a half-finished clone leaves a directory behind.
 	if _, err := os.Stat(filepath.Join(path, "HEAD")); err != nil {
@@ -103,23 +102,15 @@ func gitArgs(authArgs []string, sub ...string) []string {
 	return append(out, sub...)
 }
 
-// auth returns the git -c arguments and evnironment for authentication as the
-// machine user, or nils when no credentials is available - a public repo clones
-// anonymously, and development runs outside systemd entirely.
-func auth(tokenRef string) (args []string, env []string, err error) {
-	if tokenRef == "" {
-		return nil, nil, nil
+// auth returns the git -c arguments and environment for authenticating as the
+// machine user, or nils for an empty token — a public repo clones anonymously.
+// The token travels in the environment (never argv) and is consumed by a
+// one-shot credential helper.
+func auth(token string) (args []string, env []string) {
+	if token == "" {
+		return nil, nil
 	}
-	token, ok, err := creds.Get(tokenRef)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if !ok {
-		return nil, nil, nil
-	}
-
 	// The empty value clears any inherited helper before ours is appended.
 	return []string{"-c", "credential.helper=", "-c", "credential.helper=" + credentialHelper},
-		[]string{tokenEnvVar + "=" + token}, nil
+		[]string{tokenEnvVar + "=" + token}
 }
