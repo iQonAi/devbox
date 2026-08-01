@@ -39,10 +39,34 @@ func New(owner, repo, token string) *Client {
 
 func (c *Client) slug() string { return c.owner + "/" + c.repo }
 
+// envWithout returns os.Environ() with the named keys removed, so a caller can
+// append its own single authoritative value.
+func envWithout(keys ...string) []string {
+	var out []string
+	for _, e := range os.Environ() {
+		drop := false
+		for _, k := range keys {
+			if strings.HasPrefix(e, k+"=") {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // gh runs the gh CLI with the token in GH_TOKEN (not argv) and returns stdout.
 func (c *Client) gh(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Env = append(os.Environ(), "GH_TOKEN="+c.token, "GH_PROMPT_DISABLED=1")
+	// Drop any inherited GH_TOKEN/GH_PROMPT_DISABLED before adding ours: a
+	// duplicate key would let getenv return the inherited value first, so gh
+	// could authenticate with the operator's token instead of the repo-scoped
+	// one — breaking the D3 boundary.
+	cmd.Env = append(envWithout("GH_TOKEN", "GH_PROMPT_DISABLED"),
+		"GH_TOKEN="+c.token, "GH_PROMPT_DISABLED=1")
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -109,7 +133,9 @@ func (c *Client) OpenPR(ctx context.Context, branch, base, title, body string) (
 		bodyFile.Close()
 		return "", fmt.Errorf("write pr body: %w", err)
 	}
-	bodyFile.Close()
+	if err := bodyFile.Close(); err != nil {
+		return "", fmt.Errorf("close pr body: %w", err)
+	}
 
 	out, err := c.gh(ctx, "pr", "create", "--repo", c.slug(),
 		"--base", base, "--head", branch, "--title", title, "--body-file", bodyFile.Name())

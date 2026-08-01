@@ -305,3 +305,31 @@ func TestArtifactBadTaskFails(t *testing.T) {
 		t.Fatal("expected FK violation for unknown task, got nil")
 	}
 }
+
+func TestSetTaskPRURL(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	repoID := seedRepo(t, s)
+	if err := s.CreateTask(NewTask{ID: "task-1", RepoID: repoID, Source: "manual"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	url := "https://github.com/iQonAi/devbox/pull/42"
+	if err := s.SetTaskPRURL("task-1", url); err != nil {
+		t.Fatalf("set pr_url: %v", err)
+	}
+	var got string
+	if err := s.db.QueryRow(`SELECT pr_url FROM tasks WHERE id = ?`, "task-1").Scan(&got); err != nil {
+		t.Fatalf("read pr_url: %v", err)
+	}
+	if got != url {
+		t.Errorf("pr_url = %q, want %q", got, url)
+	}
+
+	if err := s.SetTaskPRURL("nope", url); err == nil {
+		t.Error("expected error for unknown task id")
+	}
+}

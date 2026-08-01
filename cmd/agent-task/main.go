@@ -91,6 +91,9 @@ func runRun(args []string) error {
 	if *taskText == "" && *issueNum == 0 {
 		return fmt.Errorf("one of --task or --issue is required")
 	}
+	if *taskText != "" && *issueNum != 0 {
+		return fmt.Errorf("--task and --issue are mutually exclusive")
+	}
 	if *repoURL == "" && *repoName == "" {
 		return fmt.Errorf("one of --repo or --repo-url is required")
 	}

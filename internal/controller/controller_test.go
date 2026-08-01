@@ -269,3 +269,27 @@ func TestGitHubTokenNeverReachesRunner(t *testing.T) {
 		t.Errorf("state = %q, want Failed", out.State)
 	}
 }
+
+// readArtifact must read a regular file (trimmed) but ignore a symlink — a
+// hostile agent could symlink summary.txt at an arbitrary host file.
+func TestReadArtifactIgnoresSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "summary.txt"), []byte("  hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readArtifact(dir, "summary.txt"); got != "hello" {
+		t.Errorf("regular file = %q, want %q", got, "hello")
+	}
+
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("host secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := t.TempDir()
+	if err := os.Symlink(secret, filepath.Join(linkDir, "summary.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readArtifact(linkDir, "summary.txt"); got != "" {
+		t.Errorf("symlinked artifact read %q, want \"\" (must be ignored)", got)
+	}
+}
