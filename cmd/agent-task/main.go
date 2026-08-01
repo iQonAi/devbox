@@ -7,13 +7,21 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
+	"github.com/iQonAi/devbox/internal/agent"
 	"github.com/iQonAi/devbox/internal/client"
 	"github.com/iQonAi/devbox/internal/config"
+	"github.com/iQonAi/devbox/internal/controller"
 	"github.com/iQonAi/devbox/internal/daemon"
+	"github.com/iQonAi/devbox/internal/prompt"
+	"github.com/iQonAi/devbox/internal/repo"
+	"github.com/iQonAi/devbox/internal/runner"
+	"github.com/iQonAi/devbox/internal/store"
 )
 
 const defaultConfigPath = "/etc/agent-task/config.yaml"
@@ -33,6 +41,8 @@ func main() {
 		err = runRepos(os.Args[2:])
 	case "ls":
 		err = runLs(os.Args[2:])
+	case "run":
+		err = runRun(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", os.Args[1])
 		usage()
@@ -52,7 +62,192 @@ usage:
 	agent-task serve [--config PATH]	start the daemon (Unix socket)
 	agent-task repos [--socket PATH]	list registered repositories
 	agent-task ls [--socket PATH]	list tasks
+	agent-task run --task TEXT --repo-url URL [--agent claude]	run an agent task (M3)
 `)
+}
+
+// runRun executes a single agent task end-to-end (M3). Standalone, in-process;
+// the daemon/worker-pool path is M5.
+func runRun(args []string) error {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	configPath := fs.String("config", defaultConfigPath, "path to config.yaml")
+	repoName := fs.String("repo", "", "registered repo name (from config); or use --repo-url")
+	repoURL := fs.String("repo-url", "", "source repo URL (file:// or https://); overrides the registry")
+	defaultBranch := fs.String("default-branch", "", "default branch (default: registry value or 'main')")
+	taskText := fs.String("task", "", "free-form task text (required; --issue lands in M4)")
+	agentName := fs.String("agent", "claude", "agent adapter: claude|mock")
+	authStr := fs.String("auth", "subscription", "auth method: subscription|api_key")
+	tokenFile := fs.String("model-token-file", "", "file holding the model token; else inherit the agent's env var")
+	image := fs.String("image", "localhost/devbox-agent-base:dev", "agent base image")
+	podman := fs.String("podman", "podman", "podman command, e.g. 'sudo -u agentbox /usr/local/sbin/agentbox-podman'")
+	dataDir := fs.String("data-dir", "", "mirror cache dir (default: config data_dir)")
+	workDir := fs.String("work-dir", "", "scratch dir for this run (default: a fresh temp dir)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *taskText == "" {
+		return fmt.Errorf("--task is required")
+	}
+	if *repoURL == "" && *repoName == "" {
+		return fmt.Errorf("one of --repo or --repo-url is required")
+	}
+
+	rName, rURL, rBranch, rTokenRef := *repoName, *repoURL, *defaultBranch, ""
+	rOwner, rRepo := "", ""
+	if *repoName != "" && *repoURL == "" {
+		cfg, err := config.Load(*configPath)
+		if err != nil {
+			return err
+		}
+		var found *config.Repo
+		for i := range cfg.Repos {
+			if cfg.Repos[i].Name == *repoName {
+				found = &cfg.Repos[i]
+				break
+			}
+		}
+		if found == nil {
+			return fmt.Errorf("repo %q is not in the registry", *repoName)
+		}
+		rURL = fmt.Sprintf("https://github.com/%s/%s.git", found.Owner, found.Repo)
+		rOwner, rRepo = found.Owner, found.Repo
+		rTokenRef = found.TokenRef
+		if rBranch == "" {
+			rBranch = found.DefaultBranch
+		}
+	}
+	if rName == "" {
+		rName = "task-repo"
+	}
+	if rBranch == "" {
+		rBranch = "main"
+	}
+
+	ag, err := agent.Lookup(*agentName)
+	if err != nil {
+		return err
+	}
+
+	var authValue string
+	if *tokenFile != "" {
+		b, err := os.ReadFile(*tokenFile)
+		if err != nil {
+			return fmt.Errorf("read model token: %w", err)
+		}
+		authValue = strings.TrimSpace(string(b))
+	} else if envVar, verr := ag.EnvVar(agent.AuthMethod(*authStr)); verr == nil {
+		// No token file: inherit from the agent's env var (e.g. the operator
+		// exported CLAUDE_CODE_OAUTH_TOKEN), as the flag help promises.
+		authValue = os.Getenv(envVar)
+	}
+
+	wd := *workDir
+	if wd == "" {
+		if wd, err = os.MkdirTemp("", "agent-run-"); err != nil {
+			return err
+		}
+	}
+	// The container runs as agentbox (a different uid), so it must read the
+	// source/prompt and write the out dir. M3 uses world-accessible scratch
+	// dirs; M5 replaces this with a shared group (see the runbook).
+	for _, d := range []string{wd, filepath.Join(wd, "out")} {
+		if err := os.MkdirAll(d, 0o777); err != nil {
+			return err
+		}
+		if err := os.Chmod(d, 0o777); err != nil {
+			return err
+		}
+	}
+	dd := *dataDir
+	if dd == "" {
+		if cfg, err := config.Load(*configPath); err == nil {
+			dd = cfg.DataDir
+		} else {
+			dd = wd
+		}
+	}
+
+	deps := controller.Deps{
+		Repo:   repo.NewManager(dd),
+		Runner: runner.NewPodmanRunner(strings.Fields(*podman), nil),
+		Image:  *image,
+	}
+	req := controller.Request{
+		TaskID:        fmt.Sprintf("t%d", time.Now().UnixNano()),
+		Title:         *taskText,
+		RepoName:      rName,
+		RepoURL:       rURL,
+		DefaultBranch: rBranch,
+		TokenRef:      rTokenRef,
+		Prompt:        prompt.Input{Task: *taskText},
+		Agent:         ag,
+		AuthMethod:    agent.AuthMethod(*authStr),
+		AuthValue:     authValue,
+		WorkDir:       wd,
+		Limits:        controller.Limits{CPUs: "2", MemoryMB: 2048, PidsLimit: 256, Timeout: 30 * time.Minute},
+	}
+
+	out, err := controller.Run(context.Background(), deps, req)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("state:    %s\n", out.State)
+	fmt.Printf("commits:  %d\n", out.Commits)
+	fmt.Printf("exit:     %d\n", out.ExitCode)
+	fmt.Printf("branch:   %s\n", out.Branch)
+	fmt.Printf("worktree: %s\n", out.Worktree)
+	for _, a := range out.Artifacts {
+		fmt.Printf("artifact: %-10s %s\n", a.Kind, a.Path)
+	}
+
+	// Index the run in the store (issue #11: artifacts captured and indexed).
+	// Same DB the daemon opens; the standalone run and `ls` share it.
+	st, err := store.Open(filepath.Join(dd, "agent-task.db"))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.UpsertRepo(store.Repo{
+		Name: rName, Owner: rOwner, Repo: rRepo,
+		DefaultBranch: rBranch, TokenRef: rTokenRef,
+	}); err != nil {
+		return err
+	}
+	repos, err := st.ListRepos()
+	if err != nil {
+		return err
+	}
+	var repoID int64
+	for _, r := range repos {
+		if r.Name == rName {
+			repoID = r.ID
+			break
+		}
+	}
+	if err := st.CreateTask(store.NewTask{
+		ID: req.TaskID, RepoID: repoID, Source: "manual", Agent: *agentName,
+		Branch: out.Branch, HostWorktree: out.Worktree,
+	}); err != nil {
+		return err
+	}
+	if err := st.UpdateTaskState(req.TaskID, out.State); err != nil {
+		return err
+	}
+	for _, a := range out.Artifacts {
+		if err := st.InsertArtifact(req.TaskID, a.Kind, a.Path); err != nil {
+			return err
+		}
+	}
+
+	if out.State != controller.StateCompleted {
+		if out.Error != "" {
+			return fmt.Errorf("task did not complete (state=%s, exit=%d): %s", out.State, out.ExitCode, out.Error)
+		}
+		return fmt.Errorf("task did not complete (state=%s, exit=%d)", out.State, out.ExitCode)
+	}
+	return nil
 }
 
 // runServe parses the serve flags and runs the daemon until SIGINT/SIGTERM.
