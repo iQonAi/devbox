@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,5 +229,67 @@ func TestRunFailsOnNonzeroAgent(t *testing.T) {
 	}
 	if out.State != StateFailed {
 		t.Errorf("state = %q, want Failed", out.State)
+	}
+}
+
+// capturingRunner records the Spec it was handed and produces no bundle (so the
+// run ends Failed with 0 commits, before any publish step).
+type capturingRunner struct{ spec runner.Spec }
+
+func (c *capturingRunner) Run(_ context.Context, spec runner.Spec) (runner.Result, error) {
+	c.spec = spec
+	return runner.Result{ExitCode: 0}, nil
+}
+
+// D3: the GitHub token is host-only and must never reach the container. Even
+// with a token set (client constructed, mirror synced with it), it must not
+// appear anywhere in the Spec handed to the runner.
+func TestGitHubTokenNeverReachesRunner(t *testing.T) {
+	origin := initOrigin(t)
+	cr := &capturingRunner{}
+	const secret = "ghp_SUPERSECRETTOKEN_should_not_leak"
+
+	out, err := Run(context.Background(),
+		Deps{Repo: repo.NewManager(t.TempDir()), Runner: cr, Image: "x"},
+		Request{
+			TaskID: "tok", RepoName: "devbox", RepoURL: "file://" + origin, DefaultBranch: "main",
+			Owner: "iQonAi", Repo: "devbox", GitHubToken: secret,
+			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
+			WorkDir: t.TempDir(),
+		})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	blob := fmt.Sprintf("%#v %v", cr.spec, cr.spec.Cmd)
+	if strings.Contains(blob, secret) {
+		t.Fatal("GitHub token leaked into the runner Spec")
+	}
+	// No commits (no bundle) → Failed → publish never attempted.
+	if out.State != StateFailed {
+		t.Errorf("state = %q, want Failed", out.State)
+	}
+}
+
+// readArtifact must read a regular file (trimmed) but ignore a symlink — a
+// hostile agent could symlink summary.txt at an arbitrary host file.
+func TestReadArtifactIgnoresSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "summary.txt"), []byte("  hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readArtifact(dir, "summary.txt"); got != "hello" {
+		t.Errorf("regular file = %q, want %q", got, "hello")
+	}
+
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("host secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := t.TempDir()
+	if err := os.Symlink(secret, filepath.Join(linkDir, "summary.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readArtifact(linkDir, "summary.txt"); got != "" {
+		t.Errorf("symlinked artifact read %q, want \"\" (must be ignored)", got)
 	}
 }

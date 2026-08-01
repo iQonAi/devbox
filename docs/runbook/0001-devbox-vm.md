@@ -784,3 +784,69 @@ onboarding big repos.
 - **M5:** daemon-driven runs (worker pool, cancellation, the 30-min timeout,
   restart recovery); the model key delivered via `LoadCredential` and the run
   scratch/out dirs moved to a shared-group home instead of world-accessible.
+
+## M4 GitHub integration — issue → prompt → PR (issue #12)
+
+Confirmed on the VM (verified 2026-07-31). **The bootstrap line.** A full task
+now closes to a pull request: fetch the issue, render the prompt, run the agent
+(M3), host-push the feature branch, open a templated PR, and back-link the
+issue. The repo-scoped machine-user token is used **only** host-side in the
+`github` package (D3) — never in a container, the export, the bundle, or argv.
+
+### Token (host-only, D3)
+
+The push, PR, issue fetch, and the private-repo mirror clone all use the same
+repo-scoped `iQonAi-Bot` token. It is passed to `gh` via `GH_TOKEN` (not argv)
+and to `git` via a one-shot credential helper (token in the environment, never
+in `.git/config`). M4's standalone run reads it from a file; the daemon wires
+`LoadCredential` in M5.
+
+```bash
+# make the root-owned machine-user token readable for a standalone run:
+sudo install -m 600 -o qdrtech /etc/agent-task/credentials/gh-token-devbox /tmp/gh-token
+```
+
+### Running an issue → PR
+
+```bash
+/tmp/agent-task run \
+  --repo devbox --issue 27 \
+  --agent claude --auth subscription \
+  --podman "sudo -u agentbox /usr/local/sbin/agentbox-podman" \
+  --data-dir /tmp/m4-data --work-dir /tmp/m4-work \
+  --model-token-file ~/.claude-token \
+  --github-token-file /tmp/gh-token
+```
+
+### Two findings from the live run
+
+- **`repo.Sync` takes a token value, not a `token_ref`.** The same token feeds
+  the private clone and the push/PR, so the caller resolves the credential once
+  and passes the value; `repo` no longer depends on `creds`. (The store still
+  records the `token_ref` name for the daemon.)
+- **Push to the explicit repo URL, not the `origin` remote.** The mirror is a
+  `git clone --mirror`, so `remote.origin.mirror=true` rejects a single-branch
+  refspec (*"--mirror can't be combined with refspecs"*). `github.Push` pushes
+  to `https://github.com/<owner>/<repo>.git <branch>` with the credential helper.
+
+### Validation (confirmed)
+
+A throwaway test issue (create a one-line file) run end-to-end produced PR #28
+on `iQonAi/devbox`: authored by **`iQonAi-Bot`**, base `main`, head
+`agent/claude/<slug>-<id>`, adding exactly `docs/agent-smoke.md`. The PR body
+carried the template (task id, agent, issue link, summary) and the plain marker
+**"Agent-produced — human review required. Do not merge without review."** A
+back-link comment was posted to the issue. Never auto-merged; the test PR and
+issue were closed afterward.
+
+- **PR marker:** a no-emoji safety marker (not the "🤖 generated-with-AI"
+  pattern), per operator policy — it flags agent authorship for the human gate
+  without an AI-attribution tagline.
+- **Token isolation:** unit-tested — the GitHub token never appears in the
+  runner `Spec` handed to the container.
+
+### Deferred
+
+- **M5:** the daemon drives runs (worker pool, cancellation, timeout, recovery);
+  the GitHub token via `LoadCredential` instead of a file; captured test output
+  in the PR body; the run scratch/out dirs moved to a shared-group home.

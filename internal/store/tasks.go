@@ -149,3 +149,19 @@ func (s *Store) ClearTaskWorktree(id string) error {
 	}
 	return nil
 }
+
+// SetTaskPRURL records the pull request opened for a task (M4 back-link).
+func (s *Store) SetTaskPRURL(id, url string) error {
+	res, err := s.db.Exec(`UPDATE tasks SET pr_url = ? WHERE id = ?`, url, id)
+	if err != nil {
+		return fmt.Errorf("set pr_url for %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("no task with id %q", id)
+	}
+	return nil
+}
