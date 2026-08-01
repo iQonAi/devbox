@@ -21,6 +21,7 @@ import (
 	"github.com/iQonAi/devbox/internal/prompt"
 	"github.com/iQonAi/devbox/internal/repo"
 	"github.com/iQonAi/devbox/internal/runner"
+	"github.com/iQonAi/devbox/internal/store"
 )
 
 const defaultConfigPath = "/etc/agent-task/config.yaml"
@@ -93,6 +94,7 @@ func runRun(args []string) error {
 	}
 
 	rName, rURL, rBranch, rTokenRef := *repoName, *repoURL, *defaultBranch, ""
+	rOwner, rRepo := "", ""
 	if *repoName != "" && *repoURL == "" {
 		cfg, err := config.Load(*configPath)
 		if err != nil {
@@ -109,6 +111,7 @@ func runRun(args []string) error {
 			return fmt.Errorf("repo %q is not in the registry", *repoName)
 		}
 		rURL = fmt.Sprintf("https://github.com/%s/%s.git", found.Owner, found.Repo)
+		rOwner, rRepo = found.Owner, found.Repo
 		rTokenRef = found.TokenRef
 		if rBranch == "" {
 			rBranch = found.DefaultBranch
@@ -198,7 +201,50 @@ func runRun(args []string) error {
 	for _, a := range out.Artifacts {
 		fmt.Printf("artifact: %-10s %s\n", a.Kind, a.Path)
 	}
+
+	// Index the run in the store (issue #11: artifacts captured and indexed).
+	// Same DB the daemon opens; the standalone run and `ls` share it.
+	st, err := store.Open(filepath.Join(dd, "agent-task.db"))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.UpsertRepo(store.Repo{
+		Name: rName, Owner: rOwner, Repo: rRepo,
+		DefaultBranch: rBranch, TokenRef: rTokenRef,
+	}); err != nil {
+		return err
+	}
+	repos, err := st.ListRepos()
+	if err != nil {
+		return err
+	}
+	var repoID int64
+	for _, r := range repos {
+		if r.Name == rName {
+			repoID = r.ID
+			break
+		}
+	}
+	if err := st.CreateTask(store.NewTask{
+		ID: req.TaskID, RepoID: repoID, Source: "manual", Agent: *agentName,
+		Branch: out.Branch, HostWorktree: out.Worktree,
+	}); err != nil {
+		return err
+	}
+	if err := st.UpdateTaskState(req.TaskID, out.State); err != nil {
+		return err
+	}
+	for _, a := range out.Artifacts {
+		if err := st.InsertArtifact(req.TaskID, a.Kind, a.Path); err != nil {
+			return err
+		}
+	}
+
 	if out.State != controller.StateCompleted {
+		if out.Error != "" {
+			return fmt.Errorf("task did not complete (state=%s, exit=%d): %s", out.State, out.ExitCode, out.Error)
+		}
 		return fmt.Errorf("task did not complete (state=%s, exit=%d)", out.State, out.ExitCode)
 	}
 	return nil

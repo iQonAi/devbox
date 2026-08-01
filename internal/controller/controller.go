@@ -7,6 +7,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,7 @@ type Artifact struct {
 // Outcome is the result of a run.
 type Outcome struct {
 	State     string
+	Error     string // why a Failed task failed ("" when Completed)
 	Commits   int
 	ExitCode  int
 	Branch    string
@@ -164,6 +166,18 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 
 	res, err := deps.Runner.Run(runCtx, spec)
 	if err != nil {
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			// The wall-clock timeout fired: a timed-out task is Failed (D9),
+			// not a pipeline error.
+			return Outcome{
+				State:     StateFailed,
+				Error:     "timeout",
+				Branch:    branch,
+				Worktree:  wt.Path,
+				OutDir:    outDir,
+				Artifacts: collectArtifacts(outDir),
+			}, nil
+		}
 		return Outcome{}, fmt.Errorf("run agent container: %w", err)
 	}
 
@@ -177,11 +191,19 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 
 	// 7. Apply the bundle onto the feature branch, if the agent produced commits.
 	bundlePath := filepath.Join(outDir, "changes.bundle")
-	if _, statErr := os.Stat(bundlePath); statErr == nil {
+	if fi, statErr := os.Lstat(bundlePath); statErr == nil {
+		if !fi.Mode().IsRegular() {
+			// podman cp preserves symlinks, so a hostile agent could point
+			// changes.bundle at an arbitrary host path; never follow it.
+			out.State = StateFailed
+			out.Error = "rejected non-regular artifact changes.bundle"
+			return out, nil
+		}
 		applied, applyErr := deps.Repo.ApplyBundle(ctx, wt.Path, bundlePath)
 		if applyErr != nil {
 			// An unappliable bundle is a task failure, not a pipeline error.
 			out.State = StateFailed
+			out.Error = applyErr.Error()
 			return out, nil
 		}
 		out.Commits = applied.Commits
@@ -196,12 +218,14 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 	return out, nil
 }
 
-// collectArtifacts classifies the files a run left in outDir.
+// collectArtifacts classifies the files a run left in outDir. Only regular
+// files count: podman cp preserves symlinks, so a symlinked artifact could
+// alias arbitrary host files (Lstat does not follow links).
 func collectArtifacts(outDir string) []Artifact {
 	var arts []Artifact
 	for _, a := range artifactKinds {
 		p := filepath.Join(outDir, a.name)
-		if _, err := os.Stat(p); err == nil {
+		if fi, err := os.Lstat(p); err == nil && fi.Mode().IsRegular() {
 			arts = append(arts, Artifact{Kind: a.kind, Path: p})
 		}
 	}
