@@ -333,3 +333,38 @@ func TestSetTaskPRURL(t *testing.T) {
 		t.Error("expected error for unknown task id")
 	}
 }
+
+func TestEvents(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	repoID := seedRepo(t, s)
+	if err := s.CreateTask(NewTask{ID: "task-1", RepoID: repoID, Source: "manual"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	for _, e := range []struct{ typ, msg string }{
+		{EventState, "Created→Running"},
+		{EventPhase, "sync repo"},
+		{EventSecurity, "container launched"},
+	} {
+		if err := s.InsertEvent("task-1", e.typ, e.msg); err != nil {
+			t.Fatalf("insert %s: %v", e.typ, err)
+		}
+	}
+
+	events, err := s.ListEvents("task-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 3 || events[0].Type != EventState || events[2].Message != "container launched" {
+		t.Fatalf("got %+v, want 3 events in order", events)
+	}
+
+	// FK: an event for an unknown task must be rejected (foreign_keys on).
+	if err := s.InsertEvent("nope", EventState, "x"); err == nil {
+		t.Fatal("expected FK violation for unknown task, got nil")
+	}
+}

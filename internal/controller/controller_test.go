@@ -14,6 +14,7 @@ import (
 	"github.com/iQonAi/devbox/internal/prompt"
 	"github.com/iQonAi/devbox/internal/repo"
 	"github.com/iQonAi/devbox/internal/runner"
+	"github.com/iQonAi/devbox/internal/store"
 )
 
 // localRunner simulates the container on the host: it applies the agent's effect
@@ -291,5 +292,74 @@ func TestReadArtifactIgnoresSymlink(t *testing.T) {
 	}
 	if got := readArtifact(linkDir, "summary.txt"); got != "" {
 		t.Errorf("symlinked artifact read %q, want \"\" (must be ignored)", got)
+	}
+}
+
+func TestRunRecordsStateAndPhaseEvents(t *testing.T) {
+	origin := initOrigin(t)
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	// The task must exist first (FK); the daemon creates it before running
+	if err := st.UpsertRepo(store.Repo{
+		Name:          "devbox",
+		Owner:         "o",
+		Repo:          "r",
+		DefaultBranch: "main",
+		TokenRef:      "t",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	repos, _ := st.ListRepos()
+	if err := st.CreateTask(store.NewTask{
+		ID:     "task-ev",
+		RepoID: repos[0].ID,
+		Source: "manual",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Run(context.Background(),
+		Deps{Repo: repo.NewManager(t.TempDir()), Runner: localRunner{exitCode: 0}, Image: "x", Recorder: st},
+		Request{
+			TaskID:        "task-ev",
+			Title:         "add change",
+			RepoName:      "devbox",
+			RepoURL:       "file://" + origin,
+			DefaultBranch: "main",
+			Prompt:        prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
+			WorkDir: t.TempDir(),
+		})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out.State != StateCompleted {
+		t.Fatalf("state = %q, want Completed", out.State)
+	}
+
+	events, err := st.ListEvents("task-ev")
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+
+	// First Event is entering running and the last is the terminal transition
+	if len(events) < 3 {
+		t.Fatalf("got %d events, want state+phase trail", len(events))
+	}
+	if events[0].Type != store.EventState || events[0].Message != "Created->Running" {
+		t.Errorf("first event = %+v, want Created->Running", events[0])
+	}
+	last := events[len(events)-1]
+	if last.Type != store.EventState || last.Message != "->Completed" {
+		t.Errorf("last event = %+v, want -> Completed", last)
+	}
+	// The store's peristed state matches the outcome
+	tasks, _ := st.ListTasks()
+	if tasks[0].State != StateCompleted {
+		t.Errorf("persisted state = %q, want Completed", tasks[0].State)
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/iQonAi/devbox/internal/prompt"
 	"github.com/iQonAi/devbox/internal/repo"
 	"github.com/iQonAi/devbox/internal/runner"
+	"github.com/iQonAi/devbox/internal/store"
 )
 
 // Terminal states (D9).
@@ -26,6 +27,14 @@ const (
 	StateCompleted = "Completed"
 	StateFailed    = "Failed"
 )
+
+// Recorder persists lifecycle state and appends audit events. *store.Store
+// satisfies it; nil disables recording (the m3/m4 standalone path records
+// after the run).
+type Recorder interface {
+	UpdateTaskState(id, state string) error
+	InsertEvent(taskID, eventType, message string) error
+}
 
 // Limits are the per-run resource caps.
 type Limits struct {
@@ -37,9 +46,10 @@ type Limits struct {
 
 // Deps are the collaborators a run needs.
 type Deps struct {
-	Repo   *repo.Manager
-	Runner runner.Runner
-	Image  string
+	Repo     *repo.Manager
+	Runner   runner.Runner
+	Image    string
+	Recorder Recorder // optional
 }
 
 // Request is one task to run.
@@ -93,10 +103,28 @@ var artifactKinds = []struct{ name, kind string }{
 // Run executes the task. It returns an Outcome (with a terminal State) on a
 // completed pipeline; it returns an error only when the pipeline itself could
 // not run (a failing agent is a Failed Outcome, not an error).
-func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
+func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 	if req.Agent == nil {
 		return Outcome{}, fmt.Errorf("no agent specified")
 	}
+
+	// Enter Running and record once up-front.
+	deps.setState(req.TaskID, store.StateRunning)
+	deps.event(req.TaskID, store.EventState, "Created->Running")
+
+	// Record the terminal transition exactly once, at whichever return fires.
+	// Only when the pipeline itself completed (err == nil) and a terminal state
+	// was set - a pipeline error leaves the state for the daemon to decide.
+	defer func() {
+		if err == nil && out.State != "" {
+			deps.setState(req.TaskID, out.State)
+			msg := "->" + out.State
+			if out.Error != "" {
+				msg += ": " + out.Error
+			}
+			deps.event(req.TaskID, store.EventState, msg)
+		}
+	}()
 
 	// A GitHub client (host-only, D3) is available when a token + owner/repo are
 	// set. The controller only calls its methods — it never puts the token into
@@ -139,11 +167,13 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 	}
 
 	// 2. Sync the mirror and create the feature-branch worktree.
+	deps.event(req.TaskID, store.EventPhase, "sync repo")
 	mirror, err := deps.Repo.Sync(ctx, req.RepoName, req.RepoURL, req.GitHubToken)
 	if err != nil {
 		return Outcome{}, err
 	}
 	branch := repo.BranchName(req.Agent.Name(), title, req.TaskID)
+	deps.event(req.TaskID, store.EventPhase, "add worktree")
 	wt, err := deps.Repo.AddWorktree(ctx, mirror, req.TaskID, branch, req.DefaultBranch)
 	if err != nil {
 		return Outcome{}, err
@@ -151,6 +181,7 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 
 	// 3. Build the standalone source export handed to the container.
 	exportDir := filepath.Join(req.WorkDir, "export")
+	deps.event(req.TaskID, store.EventPhase, "build export")
 	if err := deps.Repo.BuildExport(ctx, mirror, req.DefaultBranch, exportDir); err != nil {
 		return Outcome{}, err
 	}
@@ -197,7 +228,9 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 		defer cancel()
 	}
 
+	deps.event(req.TaskID, store.EventPhase, "run agent")
 	res, err := deps.Runner.Run(runCtx, spec)
+	deps.event(req.TaskID, store.EventSecurity, "container launched")
 	if err != nil {
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			// The wall-clock timeout fired: a timed-out task is Failed (D9),
@@ -214,7 +247,7 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("run agent container: %w", err)
 	}
 
-	out := Outcome{
+	out = Outcome{
 		ExitCode: res.ExitCode,
 		Branch:   branch,
 		Worktree: wt.Path,
@@ -232,6 +265,8 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 			out.Error = "rejected non-regular artifact changes.bundle"
 			return out, nil
 		}
+
+		deps.event(req.TaskID, store.EventPhase, "apply bundle")
 		applied, applyErr := deps.Repo.ApplyBundle(ctx, wt.Path, bundlePath)
 		if applyErr != nil {
 			// An unappliable bundle is a task failure, not a pipeline error.
@@ -253,6 +288,7 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 	// publish failure downgrades the task to Failed with the reason; the commits
 	// remain on the local feature branch for inspection.
 	if gh != nil {
+		deps.event(req.TaskID, store.EventSecurity, "pushed branch "+branch)
 		if err := gh.Push(ctx, wt.Path, branch); err != nil {
 			out.State, out.Error = StateFailed, "push: "+err.Error()
 			return out, nil
@@ -270,6 +306,7 @@ func Run(ctx context.Context, deps Deps, req Request) (Outcome, error) {
 			out.State, out.Error = StateFailed, "open pr: "+err.Error()
 			return out, nil
 		}
+		deps.event(req.TaskID, store.EventSecurity, "Opened PR "+url)
 		out.PRURL = url
 		if req.IssueNumber > 0 {
 			// Best-effort back-link; a comment failure must not fail the task.
@@ -305,4 +342,18 @@ func collectArtifacts(outDir string) []Artifact {
 		}
 	}
 	return arts
+}
+
+// event() and setState() are two best-effort functions a write should never fail.
+// an unwritable event or state is a monitoring problem not a task failure
+func (d Deps) event(taskID, typ, msg string) {
+	if d.Recorder != nil {
+		_ = d.Recorder.InsertEvent(taskID, typ, msg)
+	}
+}
+
+func (d Deps) setState(taskID, state string) {
+	if d.Recorder != nil {
+		_ = d.Recorder.UpdateTaskState(taskID, state)
+	}
 }
