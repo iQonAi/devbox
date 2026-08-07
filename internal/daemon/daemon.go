@@ -67,7 +67,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Recorder: st,
 	}
 	runFn := func(runCtx context.Context, req controller.Request) (controller.Outcome, error) {
-		return controller.Run(runCtx, deps, req)
+		out, err := controller.Run(runCtx, deps, req)
+		if err != nil {
+			// A pipeline error (not a terminal Outcome) must not leave the task
+			// stuck in Running: record it as Failed and log the reason.
+			slog.Error("task pipeline error", "task", req.TaskID, "error", err)
+			_ = st.UpdateTaskState(req.TaskID, store.StateFailed)
+			_ = st.InsertEvent(req.TaskID, store.EventState, "->Failed: "+err.Error())
+		}
+		return out, err
 	}
 	p := pool.New(ctx, runFn, cfg.Limits.MaxConcurrent, 128)
 	sub := &submitter{cfg: cfg, store: st, pool: p}

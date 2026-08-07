@@ -48,13 +48,15 @@ LoadCredential=claude-oauth-token:/etc/agent-task/credentials/claude-oauth-token
 Restart=on-failure
 RestartSec=2s
 
-# --- Baseline hardening (safe for the M0 skeleton) ---
-# Tighter sandboxing (NoNewPrivileges, ProtectSystem=strict, syscall filters) is
-# deferred to M2: the runner's cross-user Podman invocation (daemon -> agentbox)
-# will dictate what is compatible, and NoNewPrivileges in particular would block
-# a sudo-based hop. Keep this minimal until that mechanism is chosen.
-ProtectHome=yes
-PrivateTmp=yes
+# --- Sandboxing: deliberately minimal, dictated by the cross-user Podman hop ---
+# The daemon runs `sudo -u agentbox podman` in its OWN mount namespace, so any
+# directive that isolates the namespace also breaks the container runner:
+#   - ProtectHome=yes hides /home/agentbox, where agentbox's rootless podman
+#     storage lives -> `podman create` fails (M5: this stuck a task in Running).
+#   - PrivateTmp=yes gives podman a private /tmp, breaking its runtime state.
+#   - NoNewPrivileges would block the sudo hop itself.
+# These stay OFF until the runner's isolation mechanism is finalized (post-#17).
+# The container — not the daemon unit — is the isolation boundary (0003).
 
 [Install]
 WantedBy=multi-user.target
