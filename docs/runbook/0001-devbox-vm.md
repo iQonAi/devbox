@@ -850,3 +850,83 @@ issue were closed afterward.
 - **M5:** the daemon drives runs (worker pool, cancellation, timeout, recovery);
   the GitHub token via `LoadCredential` instead of a file; captured test output
   in the PR body; the run scratch/out dirs moved to a shared-group home.
+
+## M5 lifecycle, concurrency, cancel, recovery (issue #13)
+
+Confirmed on the VM (verified 2026-08-07). The daemon now drives tasks: `submit`
+queues, a worker pool runs them (D10 cap = 2), the full state machine + audit
+trail is recorded, `cancel` stops a run, and a restart recovers interrupted
+tasks. This is the first milestone the box can develop itself.
+
+### Deployment additions
+
+- **Config** (`/etc/agent-task/config.yaml`): `image`, `podman` (the cross-user
+  wrapper), `work_dir` (shared scratch root — see below), and an `agents:` block
+  mapping each agent to an auth method + `token_ref`.
+- **Model credential via LoadCredential** (M5, alongside the GitHub token):
+  ```bash
+  sudo install -m 600 -o root -g root ~/.claude-token \
+    /etc/agent-task/credentials/claude-oauth-token
+  ```
+  and `LoadCredential=claude-oauth-token:...` in the unit; the config
+  `agents.claude.token_ref` names it.
+- **Shared scratch group.** Per-task work dirs can't live under the daemon's
+  `0700` StateDirectory (the container uid `agentbox` can't traverse it), so they
+  live under a shared root:
+  ```bash
+  sudo groupadd -f agentwork
+  sudo usermod -aG agentwork agent-taskd
+  sudo usermod -aG agentwork agentbox
+  sudo install -d -m 2770 -o agent-taskd -g agentwork /var/lib/agent-work
+  ```
+  The unit gains `SupplementaryGroups=agentwork`; the submitter creates per-task
+  dirs `2770+setgid` so the group propagates to podman-written files and the
+  daemon can read back what `agentbox` wrote.
+
+### Two findings that only surfaced with the daemon driving podman
+
+- **`ProtectHome=yes` / `PrivateTmp=yes` break the cross-user podman hop.** The
+  daemon runs `sudo -u agentbox podman` in its **own** mount namespace, which the
+  sudo child inherits. `ProtectHome` hides `/home/agentbox` — where agentbox's
+  rootless podman storage lives — so `podman create` fails and the task hung.
+  Both directives are removed; the container (not the unit) is the isolation
+  boundary. NoNewPrivileges stays off too (it would block the sudo hop).
+- **`gh pr create` must run inside the worktree.** It shells out to `git`, and
+  the daemon's cwd is `/` (`fatal: not a git repository`). It now runs with the
+  worktree as its working directory. (`gh issue view`/`comment` are API-only and
+  cwd-independent.)
+- Also fixed: a pipeline error from the controller was discarded by the pool,
+  leaving a task stuck in `Running`. The daemon now records it as `Failed` with
+  the reason and logs it — otherwise a failure is invisible.
+
+### Running / observing tasks
+
+```bash
+agent-task submit --repo devbox --agent claude --task "…"   # → task id
+agent-task submit --repo devbox --agent claude --issue N    # issue → prompt
+agent-task ls                                               # recent tasks + state
+agent-task status <id>                                      # state + full audit trail
+agent-task cancel <id>                                      # stop a running task
+```
+
+### Validation (all confirmed live)
+
+- **End-to-end:** a `submit` ran `Created→Running`→ phases (sync, worktree,
+  export, run agent, apply bundle) → `pushed branch` → `Opened PR` → `Completed`,
+  opening a real PR as `iQonAi-Bot`. The audit trail is visible via `status`.
+- **Concurrency cap (D10):** three submissions → `ls` showed exactly **2 Running
+  + 1 Created** (queued); the third started only when a slot freed.
+- **Cancel:** `cancel` mid-run stopped the container and ended the task
+  `Cancelled` (`context.Canceled`, distinct from the timeout's `Failed`).
+- **Restart recovery:** a task interrupted by `systemctl restart` was marked
+  `Failed` ("interrupted by daemon restart") on the next start, and its worktree
+  swept.
+
+Live-test PRs/branches were closed and deleted afterward.
+
+### Deferred
+
+- Streaming logs (`agent-task logs <id> -f`) and richer `status` (current phase,
+  PR link inline) — the `obs` seams are left, not built (§11).
+- Re-adding tighter unit sandboxing once the runner's isolation mechanism is
+  finalized (post-#17): whatever is compatible with the cross-user podman hop.

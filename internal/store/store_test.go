@@ -31,6 +31,24 @@ func TestOpenMigrates(t *testing.T) {
 	}
 }
 
+// The DSN pragma must actually switch the journal to WAL (a typo'd pragma key
+// is silently ignored by the driver).
+func TestOpenEnablesWAL(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	var mode string
+	if err := s.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatalf("read journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Errorf("journal_mode = %q, want wal", mode)
+	}
+}
+
 // Re-opening the same DB must not re-apply migrations (idempotent).
 func TestMigrateIdempotent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -213,6 +231,39 @@ func TestCreateTaskBadRepoFails(t *testing.T) {
 	}
 }
 
+// SetTaskBranchWorktree makes a daemon-submitted task (created with no branch
+// or worktree) visible to the sweep once terminal.
+func TestSetTaskBranchWorktree(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	repoID := seedRepo(t, s)
+
+	if err := s.CreateTask(NewTask{ID: "task-1", RepoID: repoID, Source: "task"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := s.SetTaskBranchWorktree("task-1", "agent/claude/x-abc", "/wt/task-1"); err != nil {
+		t.Fatalf("set branch/worktree: %v", err)
+	}
+	if err := s.UpdateTaskState("task-1", StateFailed); err != nil {
+		t.Fatalf("state: %v", err)
+	}
+
+	got, err := s.SweepableTasks()
+	if err != nil {
+		t.Fatalf("sweepable: %v", err)
+	}
+	if len(got) != 1 || got[0].Branch != "agent/claude/x-abc" || got[0].HostWorktree != "/wt/task-1" {
+		t.Fatalf("sweepable = %+v, want the updated branch/worktree", got)
+	}
+
+	if err := s.SetTaskBranchWorktree("nope", "b", "/w"); err == nil {
+		t.Error("expected error for unknown task id")
+	}
+}
+
 func TestSweepableTasksOnlyTerminalWithWorktree(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -331,5 +382,40 @@ func TestSetTaskPRURL(t *testing.T) {
 
 	if err := s.SetTaskPRURL("nope", url); err == nil {
 		t.Error("expected error for unknown task id")
+	}
+}
+
+func TestEvents(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	repoID := seedRepo(t, s)
+	if err := s.CreateTask(NewTask{ID: "task-1", RepoID: repoID, Source: "manual"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	for _, e := range []struct{ typ, msg string }{
+		{EventState, "Created→Running"},
+		{EventPhase, "sync repo"},
+		{EventSecurity, "container launched"},
+	} {
+		if err := s.InsertEvent("task-1", e.typ, e.msg); err != nil {
+			t.Fatalf("insert %s: %v", e.typ, err)
+		}
+	}
+
+	events, err := s.ListEvents("task-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 3 || events[0].Type != EventState || events[2].Message != "container launched" {
+		t.Fatalf("got %+v, want 3 events in order", events)
+	}
+
+	// FK: an event for an unknown task must be rejected (foreign_keys on).
+	if err := s.InsertEvent("nope", EventState, "x"); err == nil {
+		t.Fatal("expected FK violation for unknown task, got nil")
 	}
 }

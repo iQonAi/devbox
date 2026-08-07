@@ -11,6 +11,9 @@ Wants=network-online.target
 Type=notify
 User=agent-taskd
 Group=agent-taskd
+# agentwork is the shared group for the per-task scratch handoff (M5): the daemon
+# creates work dirs the container uid (agentbox) reads/writes. Both users join it.
+SupplementaryGroups=agentwork
 
 # Binary produced by the M0 build (`go build -o /usr/local/bin/agent-task ./cmd/agent-task`).
 # Not present until M0 — do not `systemctl start` before then.
@@ -37,20 +40,23 @@ StateDirectoryMode=0700
 # Deferred repos add one line each as they join the org; the per-agent model API
 # key (M3) is wired the same way.
 LoadCredential=gh-token-devbox:/etc/agent-task/credentials/gh-token-devbox
+# Per-agent model credential (M5), named by the config agents.<name>.token_ref:
+LoadCredential=claude-oauth-token:/etc/agent-task/credentials/claude-oauth-token
 #LoadCredential=gh-token-claude-agent-config:/etc/agent-task/credentials/gh-token-claude-agent-config
 #LoadCredential=gh-token-case-tracker-fc:/etc/agent-task/credentials/gh-token-case-tracker-fc
-#LoadCredential=model-api-key:/etc/agent-task/credentials/model-api-key
 
 Restart=on-failure
 RestartSec=2s
 
-# --- Baseline hardening (safe for the M0 skeleton) ---
-# Tighter sandboxing (NoNewPrivileges, ProtectSystem=strict, syscall filters) is
-# deferred to M2: the runner's cross-user Podman invocation (daemon -> agentbox)
-# will dictate what is compatible, and NoNewPrivileges in particular would block
-# a sudo-based hop. Keep this minimal until that mechanism is chosen.
-ProtectHome=yes
-PrivateTmp=yes
+# --- Sandboxing: deliberately minimal, dictated by the cross-user Podman hop ---
+# The daemon runs `sudo -u agentbox podman` in its OWN mount namespace, so any
+# directive that isolates the namespace also breaks the container runner:
+#   - ProtectHome=yes hides /home/agentbox, where agentbox's rootless podman
+#     storage lives -> `podman create` fails (M5: this stuck a task in Running).
+#   - PrivateTmp=yes gives podman a private /tmp, breaking its runtime state.
+#   - NoNewPrivileges would block the sudo hop itself.
+# These stay OFF until the runner's isolation mechanism is finalized (post-#17).
+# The container — not the daemon unit — is the isolation boundary (0003).
 
 [Install]
 WantedBy=multi-user.target

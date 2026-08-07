@@ -67,6 +67,24 @@ func (s *Store) UpdateTaskState(id, state string) error {
 	return nil
 }
 
+// SetTaskBranchWorktree records a task's feature branch and host worktree path
+// as soon as they exist, so the orphan sweep can reclaim the worktree once the
+// task reaches a terminal state.
+func (s *Store) SetTaskBranchWorktree(id, branch, worktree string) error {
+	res, err := s.db.Exec(`UPDATE tasks SET branch = ?, host_worktree = ? WHERE id = ?`, branch, worktree, id)
+	if err != nil {
+		return fmt.Errorf("set branch/worktree for %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("no task with id %q", id)
+	}
+	return nil
+}
+
 // ListTasks returns all tasks, newest first.  Empty at M0 (nothing creates tasks yet).
 func (s *Store) ListTasks() ([]Task, error) {
 	rows, err := s.db.Query(`

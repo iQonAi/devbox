@@ -62,3 +62,26 @@ func writeTempConfig(t *testing.T, content string) string {
 	}
 	return path
 }
+
+func TestLoadAgents(t *testing.T) {
+	path := writeTempConfig(t, "repos:\n  - {name: a, owner: o, repo: r, token_ref: t}\n"+
+		"agents:\n  claude: {auth: subscription, token_ref: claude-oauth-token}\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Agents["claude"].Auth != "subscription" || cfg.Agents["claude"].TokenRef != "claude-oauth-token" {
+		t.Errorf("agent config not parsed: %+v", cfg.Agents["claude"])
+	}
+	if cfg.Image == "" || cfg.Podman == "" {
+		t.Errorf("image/podman defaults not applied: image=%q podman=%q", cfg.Image, cfg.Podman)
+	}
+}
+
+func TestLoadRejectsBadAgentAuth(t *testing.T) {
+	path := writeTempConfig(t, "repos:\n  - {name: a, owner: o, repo: r, token_ref: t}\n"+
+		"agents:\n  claude: {auth: bogus, token_ref: x}\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error for bad agent auth")
+	}
+}

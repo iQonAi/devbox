@@ -14,3 +14,13 @@ repos:
     repo: devbox
     default_branch: main
     token_ref: gh-token-devbox
+
+# Agent base image and the podman command (the cross-user wrapper on the VM).
+image: localhost/devbox-agent-base:dev
+podman: "sudo -u agentbox /usr/local/sbin/agentbox-podman"
+
+# Per-agent auth policy. token_ref names a LoadCredential secret (never the key).
+agents:
+  claude:
+    auth: subscription
+    token_ref: claude-oauth-token
