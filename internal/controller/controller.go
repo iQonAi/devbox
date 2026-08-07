@@ -314,7 +314,7 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 			TaskID: req.TaskID, Agent: req.Agent.Name(), IssueURL: issueURL,
 			Summary: readArtifact(outDir, "summary.txt"),
 		})
-		url, err := gh.OpenPR(ctx, branch, req.DefaultBranch, prTitle, body)
+		url, err := gh.OpenPR(ctx, wt.Path, branch, req.DefaultBranch, prTitle, body)
 		if err != nil {
 			out.State, out.Error = StateFailed, "open pr: "+err.Error()
 			return out, nil

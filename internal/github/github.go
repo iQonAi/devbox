@@ -59,8 +59,13 @@ func envWithout(keys ...string) []string {
 }
 
 // gh runs the gh CLI with the token in GH_TOKEN (not argv) and returns stdout.
-func (c *Client) gh(ctx context.Context, args ...string) (string, error) {
+// dir is the working directory ("" = inherit); some gh subcommands (pr create)
+// shell out to git and must run inside a git repo.
+func (c *Client) gh(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	// Drop any inherited GH_TOKEN/GH_PROMPT_DISABLED before adding ours: a
 	// duplicate key would let getenv return the inherited value first, so gh
 	// could authenticate with the operator's token instead of the repo-scoped
@@ -79,7 +84,7 @@ func (c *Client) gh(ctx context.Context, args ...string) (string, error) {
 
 // FetchIssue renders an issue into the prompt input (D8 --issue).
 func (c *Client) FetchIssue(ctx context.Context, number int) (prompt.Issue, error) {
-	out, err := c.gh(ctx, "issue", "view", strconv.Itoa(number),
+	out, err := c.gh(ctx, "", "issue", "view", strconv.Itoa(number),
 		"--repo", c.slug(), "--json", "number,title,body,url")
 	if err != nil {
 		return prompt.Issue{}, err
@@ -122,8 +127,9 @@ func (c *Client) Push(ctx context.Context, worktreeDir, branch string) error {
 }
 
 // OpenPR opens a pull request (base = the default branch) and returns its URL.
-// Never auto-merged.
-func (c *Client) OpenPR(ctx context.Context, branch, base, title, body string) (string, error) {
+// Runs from worktreeDir because `gh pr create` shells out to git and needs a
+// git repo. Never auto-merged.
+func (c *Client) OpenPR(ctx context.Context, worktreeDir, branch, base, title, body string) (string, error) {
 	bodyFile, err := os.CreateTemp("", "pr-body-")
 	if err != nil {
 		return "", fmt.Errorf("pr body file: %w", err)
@@ -137,7 +143,7 @@ func (c *Client) OpenPR(ctx context.Context, branch, base, title, body string) (
 		return "", fmt.Errorf("close pr body: %w", err)
 	}
 
-	out, err := c.gh(ctx, "pr", "create", "--repo", c.slug(),
+	out, err := c.gh(ctx, worktreeDir, "pr", "create", "--repo", c.slug(),
 		"--base", base, "--head", branch, "--title", title, "--body-file", bodyFile.Name())
 	if err != nil {
 		return "", err
@@ -147,6 +153,6 @@ func (c *Client) OpenPR(ctx context.Context, branch, base, title, body string) (
 
 // CommentIssue posts a comment (used to back-link the PR onto the source issue).
 func (c *Client) CommentIssue(ctx context.Context, number int, body string) error {
-	_, err := c.gh(ctx, "issue", "comment", strconv.Itoa(number), "--repo", c.slug(), "--body", body)
+	_, err := c.gh(ctx, "", "issue", "comment", strconv.Itoa(number), "--repo", c.slug(), "--body", body)
 	return err
 }
