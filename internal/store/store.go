@@ -16,7 +16,7 @@ type Store struct {
 func Open(dbPath string) (*Store, error) {
 	// DSN "pragmas" configure SQLite: enforce foreign keys, use WAL journaling
 	// (better concurrency), and wait up to 5s on locked DB before erroring.
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dbPath)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

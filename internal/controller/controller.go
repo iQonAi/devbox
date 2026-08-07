@@ -29,6 +29,32 @@ const (
 	StateCancelled = "Cancelled"
 )
 
+// Cancel causes: attached via context.WithCancelCause so recording can tell an
+// operator cancel (-> Cancelled) from a daemon shutdown (-> Failed, matching
+// the recovery wording). Defined here — not in pool — because pool already
+// imports controller and both packages need them.
+var (
+	ErrUserCancel = errors.New("cancelled by user")
+	ErrShutdown   = errors.New("interrupted by daemon shutdown")
+)
+
+// ContextOutcome maps a done task context to its terminal state and reason
+// (§7.4): timeout -> Failed "timeout"; daemon shutdown -> Failed with the
+// recovery wording; any other cancel -> Cancelled "cancelled". ok is false
+// while the context is still live.
+func ContextOutcome(ctx context.Context) (state, reason string, ok bool) {
+	switch {
+	case ctx.Err() == nil:
+		return "", "", false
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return StateFailed, "timeout", true
+	case errors.Is(context.Cause(ctx), ErrShutdown):
+		return StateFailed, "interrupted by daemon shutdown", true
+	default:
+		return StateCancelled, "cancelled", true
+	}
+}
+
 // Recorder persists lifecycle state, audit events, artifacts, and the PR URL.
 // *store.Store satisfies it; nil disables recording (the standalone --local path
 // records after the run).
@@ -37,6 +63,7 @@ type Recorder interface {
 	InsertEvent(taskID, eventType, message string) error
 	InsertArtifact(taskID, kind, path string) error
 	SetTaskPRURL(id, url string) error
+	SetTaskBranchWorktree(id, branch, worktree string) error
 }
 
 // Limits are the per-run resource caps.
@@ -186,6 +213,11 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	// Persist branch + worktree as soon as they exist, so the orphan sweep can
+	// find them even if this run never reaches a terminal Outcome.
+	if deps.Recorder != nil {
+		_ = deps.Recorder.SetTaskBranchWorktree(req.TaskID, branch, wt.Path)
+	}
 
 	// 3. Build the standalone source export handed to the container.
 	exportDir := filepath.Join(req.WorkDir, "export")
@@ -237,28 +269,27 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 	}
 
 	deps.event(req.TaskID, store.EventPhase, "run agent")
+	// The launch attempt is recorded before Run; success-side events after —
+	// so the trail never claims a launch that failed (§12).
+	deps.event(req.TaskID, store.EventSecurity, "launching container "+runner.ContainerName(spec))
 	res, err := deps.Runner.Run(runCtx, spec)
-	deps.event(req.TaskID, store.EventSecurity, "container launched")
 	if err != nil {
-		// The runner error may be the run context ending. Distinguish the two
-		// context causes: a wall-clock timeout is Failed (D9); an explicit cancel
-		// (agent-task cancel) is Cancelled (§7.4). Both fire the same cancel path.
-		switch {
-		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+		// The runner error may be the run context ending. Map the context cause
+		// to the terminal state (§7.4): timeout is Failed (D9), a cancel is
+		// Cancelled, a daemon shutdown is Failed. All fire the same cancel path.
+		if state, reason, ok := ContextOutcome(runCtx); ok {
 			return Outcome{
-				State: StateFailed, Error: "timeout",
-				Branch: branch, Worktree: wt.Path, OutDir: outDir,
-				Artifacts: collectArtifacts(outDir),
-			}, nil
-		case errors.Is(runCtx.Err(), context.Canceled):
-			return Outcome{
-				State: StateCancelled, Error: "cancelled",
+				State: state, Error: reason,
 				Branch: branch, Worktree: wt.Path, OutDir: outDir,
 				Artifacts: collectArtifacts(outDir),
 			}, nil
 		}
 		return Outcome{}, fmt.Errorf("run agent container: %w", err)
 	}
+	// A successful Run means the container launched, ran, and was torn down
+	// (teardown is deferred inside the runner).
+	deps.event(req.TaskID, store.EventSecurity, "container launched")
+	deps.event(req.TaskID, store.EventSecurity, "container destroyed")
 
 	out = Outcome{
 		ExitCode: res.ExitCode,
@@ -278,14 +309,14 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 			out.Error = "rejected non-regular artifact changes.bundle"
 			return out, nil
 		}
+		deps.event(req.TaskID, store.EventSecurity, "bundle extracted")
 
 		deps.event(req.TaskID, store.EventPhase, "apply bundle")
 		applied, applyErr := deps.Repo.ApplyBundle(ctx, wt.Path, bundlePath)
 		if applyErr != nil {
-			// An unappliable bundle is a task failure, not a pipeline error.
-			out.State = StateFailed
-			out.Error = applyErr.Error()
-			return out, nil
+			// An unappliable bundle is a task failure, not a pipeline error —
+			// unless the task context ended (a cancel mid-apply is Cancelled).
+			return failedOutcome(ctx, out, applyErr.Error()), nil
 		}
 		out.Commits = applied.Commits
 	}
@@ -301,11 +332,10 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 	// publish failure downgrades the task to Failed with the reason; the commits
 	// remain on the local feature branch for inspection.
 	if gh != nil {
-		deps.event(req.TaskID, store.EventSecurity, "pushed branch "+branch)
 		if err := gh.Push(ctx, wt.Path, branch); err != nil {
-			out.State, out.Error = StateFailed, "push: "+err.Error()
-			return out, nil
+			return failedOutcome(ctx, out, "push: "+err.Error()), nil
 		}
+		deps.event(req.TaskID, store.EventSecurity, "pushed branch "+branch)
 		prTitle := title
 		if prTitle == "" {
 			prTitle = req.TaskID
@@ -316,8 +346,7 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 		})
 		url, err := gh.OpenPR(ctx, wt.Path, branch, req.DefaultBranch, prTitle, body)
 		if err != nil {
-			out.State, out.Error = StateFailed, "open pr: "+err.Error()
-			return out, nil
+			return failedOutcome(ctx, out, "open pr: "+err.Error()), nil
 		}
 		deps.event(req.TaskID, store.EventSecurity, "Opened PR "+url)
 		out.PRURL = url
@@ -327,6 +356,17 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 		}
 	}
 	return out, nil
+}
+
+// failedOutcome marks out Failed with reason — unless the task context ended,
+// in which case the context's terminal state wins (cancel anywhere is
+// Cancelled, timeout anywhere is Failed "timeout"; §7.4).
+func failedOutcome(ctx context.Context, out Outcome, reason string) Outcome {
+	out.State, out.Error = StateFailed, reason
+	if state, r, ok := ContextOutcome(ctx); ok {
+		out.State, out.Error = state, r
+	}
+	return out
 }
 
 // readArtifact returns the trimmed contents of outDir/name, or "" if absent or

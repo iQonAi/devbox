@@ -27,6 +27,11 @@ const (
 	socketMode = 0o660
 
 	shutdownTimeout = 10 * time.Second
+
+	// poolDrainTimeout bounds the shutdown wait for in-flight tasks. The
+	// per-task deadline already bounds each task; this is a backstop so a
+	// wedged task cannot hang shutdown forever.
+	poolDrainTimeout = 30 * time.Second
 )
 
 // Run opens the store, seeds the repo registry, and servers until ctx is cancelled
@@ -42,10 +47,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	// Recover tasks left in-flight by a crash/restart: their containers and
-	// contexts are gone, so they cannot resume — fail them so the sweep can
-	// reclaim their worktrees and status is honest.
-	if n := recoverInflight(st); n > 0 {
+	// Recover tasks left in-flight by a crash/restart: their contexts are
+	// gone, so they cannot resume — fail them so the sweep can reclaim their
+	// worktrees and status is honest, and destroy any orphaned containers
+	// (disposability, §8.9).
+	pr := runner.NewPodmanRunner(strings.Fields(cfg.Podman), nil)
+	if n := recoverInflight(ctx, st, pr); n > 0 {
 		slog.Warn("recovered interrupted tasks", "count", n)
 	}
 
@@ -62,18 +69,33 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// controller.Run for each submitted task; the store is the Recorder.
 	deps := controller.Deps{
 		Repo:     mgr,
-		Runner:   runner.NewPodmanRunner(strings.Fields(cfg.Podman), nil),
+		Runner:   pr,
 		Image:    cfg.Image,
 		Recorder: st,
 	}
+	// Already validated by config.Validate; "" would parse to 0 (no deadline).
+	taskTimeout, _ := time.ParseDuration(cfg.Limits.TaskTimeout)
 	runFn := func(runCtx context.Context, req controller.Request) (controller.Outcome, error) {
+		// The deadline covers the ENTIRE task (not just the container run), so
+		// a wedged git/gh call cannot hold a worker slot forever (§8.6).
+		if taskTimeout > 0 {
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithTimeout(runCtx, taskTimeout)
+			defer cancel()
+		}
 		out, err := controller.Run(runCtx, deps, req)
 		if err != nil {
 			// A pipeline error (not a terminal Outcome) must not leave the task
-			// stuck in Running: record it as Failed and log the reason.
+			// stuck in Running: record its terminal state and log the reason.
+			// The task context decides it (§7.4): cancel -> Cancelled, timeout
+			// or shutdown -> Failed; otherwise Failed with the error.
+			state, reason, ok := controller.ContextOutcome(runCtx)
+			if !ok {
+				state, reason = store.StateFailed, err.Error()
+			}
 			slog.Error("task pipeline error", "task", req.TaskID, "error", err)
-			_ = st.UpdateTaskState(req.TaskID, store.StateFailed)
-			_ = st.InsertEvent(req.TaskID, store.EventState, "->Failed: "+err.Error())
+			_ = st.UpdateTaskState(req.TaskID, state)
+			_ = st.InsertEvent(req.TaskID, store.EventState, "->"+state+": "+reason)
 		}
 		return out, err
 	}
@@ -117,14 +139,25 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	// Workers were cancelled with ctx; wait for them to drain.
-	p.Wait()
+	// Workers were cancelled with ctx; wait for them to drain, but bounded —
+	// a wedged task must not hang shutdown forever.
+	if !p.WaitTimeout(poolDrainTimeout) {
+		slog.Warn("pool drain timed out; abandoning in-flight tasks", "timeout", poolDrainTimeout)
+	}
 	return nil
 }
 
+// containerKiller destroys a task's leftover container. *runner.PodmanRunner
+// implements it; recovery tests inject a fake.
+type containerKiller interface {
+	Destroy(ctx context.Context, taskID string) error
+}
+
 // recoverInflight fails any task left in a non-terminal state by a previous
-// daemon (crash or restart). Returns how many were recovered.
-func recoverInflight(st *store.Store) int {
+// daemon (crash or restart) and destroys its orphaned container (§8.9).
+// Container removal is best-effort: a failure is logged, never fatal.
+// Returns how many were recovered.
+func recoverInflight(ctx context.Context, st *store.Store, killer containerKiller) int {
 	tasks, err := st.ListTasks()
 	if err != nil {
 		slog.Error("recover: list tasks", "error", err)
@@ -135,6 +168,11 @@ func recoverInflight(st *store.Store) int {
 		if t.State == store.StateCreated || t.State == store.StateRunning {
 			_ = st.UpdateTaskState(t.ID, store.StateFailed)
 			_ = st.InsertEvent(t.ID, store.EventState, "->Failed: interrupted by daemon restart")
+			if err := killer.Destroy(ctx, t.ID); err != nil {
+				slog.Warn("recover: remove container", "task", t.ID, "error", err)
+			} else {
+				_ = st.InsertEvent(t.ID, store.EventSecurity, "container destroyed (recovery)")
+			}
 			n++
 		}
 	}

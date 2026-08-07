@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,7 +76,14 @@ func (s *submitter) Submit(sr api.SubmitRequest) (string, error) {
 		return "", err
 	}
 
-	taskID := fmt.Sprintf("t%d", time.Now().UnixNano())
+	// UnixNano alone can collide (clock steps, parallel submits); a random
+	// suffix makes the id unique. Hex keeps it inside the container-name
+	// charset ([a-z0-9-], see runner's name validation).
+	suffix := make([]byte, 4)
+	if _, err := rand.Read(suffix); err != nil {
+		return "", fmt.Errorf("task id suffix: %w", err)
+	}
+	taskID := fmt.Sprintf("t%d-%x", time.Now().UnixNano(), suffix)
 	source := "task"
 	if sr.Issue > 0 {
 		source = "issue"
@@ -128,10 +136,17 @@ func (s *submitter) Submit(sr api.SubmitRequest) (string, error) {
 }
 
 func (s *submitter) Cancel(taskID string) error {
-	if !s.pool.Cancel(taskID) {
+	found, queued := s.pool.Cancel(taskID)
+	if !found {
 		return fmt.Errorf("task %q is not running", taskID)
 	}
 	_ = s.store.InsertEvent(taskID, store.EventSecurity, "cancel requested")
+	if queued {
+		// The task never started (the pool skips it), so nothing else will
+		// record its terminal state — do it here (§7.1: cancel before start).
+		_ = s.store.UpdateTaskState(taskID, store.StateCancelled)
+		_ = s.store.InsertEvent(taskID, store.EventState, "Created->Cancelled: cancelled before start")
+	}
 	return nil
 }
 

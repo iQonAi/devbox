@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// event types - the controlled vocabulary fo rthe append-only audit trail
+// event types - the controlled vocabulary for the append-only audit trail
 const (
 	EventState    = "state"    // a lifecycle transition (Created->Running->Completed)
 	EventPhase    = "phase"    // an internal phase within Running

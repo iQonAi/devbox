@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -127,11 +128,31 @@ func NewPodmanRunner(base, env []string) *PodmanRunner {
 	return &PodmanRunner{cmd: execCommander{base: base, env: env}}
 }
 
+// envFileGroup is the shared group for the daemon->agentbox handoff (M5, see
+// deploy/): membership lets agentbox's podman read the env file without it
+// being world-readable.
+const envFileGroup = "agentwork"
+
+// envFileGID resolves the shared handoff group, or -1 when it does not exist
+// (dev machines without the agentwork group).
+func envFileGID() int {
+	g, err := user.LookupGroup(envFileGroup)
+	if err != nil {
+		return -1
+	}
+	gid, err := strconv.Atoi(g.Gid)
+	if err != nil {
+		return -1
+	}
+	return gid
+}
+
 // writeEnvFile writes name=value lines to a temp file for `podman --env-file`,
 // keeping secret values out of argv. Returns the path and a cleanup func; the
-// path is "" (and cleanup a no-op) when there is no secret env. The file is
-// world-readable so agentbox (the podman user) can read it across the uid
-// boundary — acceptable on the single-user host; M5 narrows it to a shared group.
+// path is "" (and cleanup a no-op) when there is no secret env. agentbox (the
+// podman user) reads the file across the uid boundary via the shared agentwork
+// group (dir 0750, file 0640). On hosts without that group (dev machines) it
+// falls back to world-readable — acceptable on the single-user host.
 func writeEnvFile(env map[string]string) (string, func(), error) {
 	noop := func() {}
 	if len(env) == 0 {
@@ -142,9 +163,21 @@ func writeEnvFile(env map[string]string) (string, func(), error) {
 		return "", noop, fmt.Errorf("env file dir: %w", err)
 	}
 	cleanup := func() { os.RemoveAll(dir) }
-	if err := os.Chmod(dir, 0o755); err != nil {
+
+	gid := envFileGID()
+	dirMode, fileMode := os.FileMode(0o755), os.FileMode(0o644)
+	if gid >= 0 {
+		dirMode, fileMode = os.FileMode(0o750), os.FileMode(0o640)
+	}
+	if err := os.Chmod(dir, dirMode); err != nil {
 		cleanup()
 		return "", noop, fmt.Errorf("env file dir perms: %w", err)
+	}
+	if gid >= 0 {
+		if err := os.Chown(dir, -1, gid); err != nil {
+			cleanup()
+			return "", noop, fmt.Errorf("env file dir group: %w", err)
+		}
 	}
 
 	names := make([]string, 0, len(env))
@@ -158,11 +191,30 @@ func writeEnvFile(env map[string]string) (string, func(), error) {
 	}
 
 	path := filepath.Join(dir, "env")
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(b.String()), fileMode); err != nil {
 		cleanup()
 		return "", noop, fmt.Errorf("write env file: %w", err)
 	}
+	if gid >= 0 {
+		if err := os.Chown(path, -1, gid); err != nil {
+			cleanup()
+			return "", noop, fmt.Errorf("env file group: %w", err)
+		}
+	}
 	return path, cleanup, nil
+}
+
+// Destroy force-removes a task's leftover container by its deterministic name.
+// Used by daemon recovery to clean up after a crash (§8.9); best-effort at the
+// caller, but the name is validated like Run's.
+func (r *PodmanRunner) Destroy(ctx context.Context, taskID string) error {
+	if !validName.MatchString(taskID) {
+		return fmt.Errorf("invalid task name %q: must match %s", taskID, validName)
+	}
+	if _, _, err := r.cmd.run(ctx, "rm", "-f", ContainerName(Spec{Name: taskID})); err != nil {
+		return fmt.Errorf("remove container: %w", err)
+	}
+	return nil
 }
 
 // seedOutDir creates an empty /task/out inside the container by copying an empty

@@ -357,10 +357,76 @@ func TestRunRecordsStateAndPhaseEvents(t *testing.T) {
 	if last.Type != store.EventState || last.Message != "->Completed" {
 		t.Errorf("last event = %+v, want -> Completed", last)
 	}
-	// The store's peristed state matches the outcome
+	// The security trail is honest (§12): launch attempt, launch, teardown,
+	// and bundle extraction are all recorded.
+	for _, want := range []string{"launching container", "container launched", "container destroyed", "bundle extracted"} {
+		found := false
+		for _, e := range events {
+			if e.Type == store.EventSecurity && strings.Contains(e.Message, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing security event %q in %+v", want, events)
+		}
+	}
+
+	// The store's persisted state matches the outcome
 	tasks, _ := st.ListTasks()
 	if tasks[0].State != StateCompleted {
 		t.Errorf("persisted state = %q, want Completed", tasks[0].State)
+	}
+
+	// Branch + worktree were persisted mid-run (via the Recorder), so the
+	// orphan sweep can find the terminal task's worktree.
+	sweepable, err := st.SweepableTasks()
+	if err != nil {
+		t.Fatalf("sweepable: %v", err)
+	}
+	found := false
+	for _, s := range sweepable {
+		if s.ID == "task-ev" && s.Branch == out.Branch && s.HostWorktree == out.Worktree {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("task-ev not sweepable (branch/worktree not persisted): %+v", sweepable)
+	}
+}
+
+// ContextOutcome maps context causes to terminal states (§7.4): timeout ->
+// Failed, shutdown -> Failed with the recovery wording, user/plain cancel ->
+// Cancelled, live context -> not ok.
+func TestContextOutcome(t *testing.T) {
+	live := context.Background()
+	if _, _, ok := ContextOutcome(live); ok {
+		t.Error("live context reported a terminal outcome")
+	}
+
+	timedOut, cancelT := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancelT()
+	<-timedOut.Done()
+	if s, r, ok := ContextOutcome(timedOut); !ok || s != StateFailed || r != "timeout" {
+		t.Errorf("timeout = (%q, %q, %v), want (Failed, timeout, true)", s, r, ok)
+	}
+
+	shut, cancelS := context.WithCancelCause(context.Background())
+	cancelS(ErrShutdown)
+	if s, r, ok := ContextOutcome(shut); !ok || s != StateFailed || r != "interrupted by daemon shutdown" {
+		t.Errorf("shutdown = (%q, %q, %v), want (Failed, interrupted..., true)", s, r, ok)
+	}
+
+	userC, cancelU := context.WithCancelCause(context.Background())
+	cancelU(ErrUserCancel)
+	if s, r, ok := ContextOutcome(userC); !ok || s != StateCancelled || r != "cancelled" {
+		t.Errorf("user cancel = (%q, %q, %v), want (Cancelled, cancelled, true)", s, r, ok)
+	}
+
+	plain, cancelP := context.WithCancel(context.Background())
+	cancelP()
+	if s, _, ok := ContextOutcome(plain); !ok || s != StateCancelled {
+		t.Errorf("plain cancel state = %q, want Cancelled", s)
 	}
 }
 

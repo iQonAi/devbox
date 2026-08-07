@@ -281,7 +281,11 @@ func runRun(args []string) error {
 		Limits:        controller.Limits{CPUs: "2", MemoryMB: 2048, PidsLimit: 256, Timeout: 30 * time.Minute},
 	}
 
-	out, err := controller.Run(context.Background(), deps, req)
+	// The deadline covers the whole task, matching the daemon path: a wedged
+	// git/gh call is bounded too, not just the container run.
+	runCtx, cancelRun := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancelRun()
+	out, err := controller.Run(runCtx, deps, req)
 	if err != nil {
 		return err
 	}
