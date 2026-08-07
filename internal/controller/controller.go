@@ -26,14 +26,17 @@ import (
 const (
 	StateCompleted = "Completed"
 	StateFailed    = "Failed"
+	StateCancelled = "Cancelled"
 )
 
-// Recorder persists lifecycle state and appends audit events. *store.Store
-// satisfies it; nil disables recording (the m3/m4 standalone path records
-// after the run).
+// Recorder persists lifecycle state, audit events, artifacts, and the PR URL.
+// *store.Store satisfies it; nil disables recording (the standalone --local path
+// records after the run).
 type Recorder interface {
 	UpdateTaskState(id, state string) error
 	InsertEvent(taskID, eventType, message string) error
+	InsertArtifact(taskID, kind, path string) error
+	SetTaskPRURL(id, url string) error
 }
 
 // Limits are the per-run resource caps.
@@ -112,18 +115,23 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 	deps.setState(req.TaskID, store.StateRunning)
 	deps.event(req.TaskID, store.EventState, "Created->Running")
 
-	// Record the terminal transition exactly once, at whichever return fires.
-	// Only when the pipeline itself completed (err == nil) and a terminal state
-	// was set - a pipeline error leaves the state for the daemon to decide.
+	// Record everything terminal exactly once, at whichever return fires — the
+	// returned Outcome becomes `out`. Only when the pipeline completed (err ==
+	// nil) and a terminal state was set; a pipeline error leaves it to the daemon.
 	defer func() {
-		if err == nil && out.State != "" {
-			deps.setState(req.TaskID, out.State)
-			msg := "->" + out.State
-			if out.Error != "" {
-				msg += ": " + out.Error
-			}
-			deps.event(req.TaskID, store.EventState, msg)
+		if err != nil || out.State == "" {
+			return
 		}
+		deps.recordArtifacts(req.TaskID, out.Artifacts)
+		if out.PRURL != "" && deps.Recorder != nil {
+			_ = deps.Recorder.SetTaskPRURL(req.TaskID, out.PRURL)
+		}
+		deps.setState(req.TaskID, out.State)
+		msg := "->" + out.State
+		if out.Error != "" {
+			msg += ": " + out.Error
+		}
+		deps.event(req.TaskID, store.EventState, msg)
 	}()
 
 	// A GitHub client (host-only, D3) is available when a token + owner/repo are
@@ -232,15 +240,20 @@ func Run(ctx context.Context, deps Deps, req Request) (out Outcome, err error) {
 	res, err := deps.Runner.Run(runCtx, spec)
 	deps.event(req.TaskID, store.EventSecurity, "container launched")
 	if err != nil {
-		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			// The wall-clock timeout fired: a timed-out task is Failed (D9),
-			// not a pipeline error.
+		// The runner error may be the run context ending. Distinguish the two
+		// context causes: a wall-clock timeout is Failed (D9); an explicit cancel
+		// (agent-task cancel) is Cancelled (§7.4). Both fire the same cancel path.
+		switch {
+		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 			return Outcome{
-				State:     StateFailed,
-				Error:     "timeout",
-				Branch:    branch,
-				Worktree:  wt.Path,
-				OutDir:    outDir,
+				State: StateFailed, Error: "timeout",
+				Branch: branch, Worktree: wt.Path, OutDir: outDir,
+				Artifacts: collectArtifacts(outDir),
+			}, nil
+		case errors.Is(runCtx.Err(), context.Canceled):
+			return Outcome{
+				State: StateCancelled, Error: "cancelled",
+				Branch: branch, Worktree: wt.Path, OutDir: outDir,
 				Artifacts: collectArtifacts(outDir),
 			}, nil
 		}
@@ -355,5 +368,14 @@ func (d Deps) event(taskID, typ, msg string) {
 func (d Deps) setState(taskID, state string) {
 	if d.Recorder != nil {
 		_ = d.Recorder.UpdateTaskState(taskID, state)
+	}
+}
+
+func (d Deps) recordArtifacts(taskID string, arts []Artifact) {
+	if d.Recorder == nil {
+		return
+	}
+	for _, a := range arts {
+		_ = d.Recorder.InsertArtifact(taskID, a.Kind, a.Path)
 	}
 }

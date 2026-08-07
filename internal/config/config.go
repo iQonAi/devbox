@@ -16,14 +16,26 @@ const (
 	defaultMaxConcurrent = 2
 	defaultTaskTimeout   = "30m"
 	defaultBranch        = "main"
+	defaultImage         = "localhost/devbox-agent-base:dev"
+	defaultPodman        = "podman"
 )
 
 // Config is the whole config.yaml, parsed into go
 type Config struct {
-	SocketPath string `yaml:"socket_path"`
-	DataDir    string `yaml:"data_dir"`
-	Limits     Limits `yaml:"limits"`
-	Repos      []Repo `yaml:"repos"`
+	SocketPath string                 `yaml:"socket_path"`
+	DataDir    string                 `yaml:"data_dir"`
+	Image      string                 `yaml:"image"`
+	Podman     string                 `yaml:"podman"`
+	Limits     Limits                 `yaml:"limits"`
+	Repos      []Repo                 `yaml:"repos"`
+	Agents     map[string]AgentConfig `yaml:"agents"`
+}
+
+// AgentConfig is the per-agent auth policy. token_ref names a LoadCredential
+// secret (the model key); the secret itself never appears in config (D3).
+type AgentConfig struct {
+	Auth     string `yaml:"auth"`      // "subscription" | "api_key"
+	TokenRef string `yaml:"token_ref"` // LoadCredential name for the model credential
 }
 
 // Limits are the daemon's resource caps (D10)
@@ -82,6 +94,14 @@ func (c *Config) applyDefaults() {
 		c.Limits.TaskTimeout = defaultTaskTimeout
 	}
 
+	if c.Image == "" {
+		c.Image = defaultImage
+	}
+
+	if c.Podman == "" {
+		c.Podman = defaultPodman
+	}
+
 	// range give a COPY of each element, so index by i to mutate the slice
 	for i := range c.Repos {
 		if c.Repos[i].DefaultBranch == "" {
@@ -117,6 +137,17 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("repo %q: token_ref is required (the LoadCredential secret name)", r.Name)
 		}
 		seen[r.Name] = true
+	}
+
+	for name, a := range c.Agents {
+		switch a.Auth {
+		case "subscription", "api_key":
+		default:
+			return fmt.Errorf("agent %q: auth must be subscription or api_key, got %q", name, a.Auth)
+		}
+		if a.TokenRef == "" {
+			return fmt.Errorf("agent %q: token_ref is required", name)
+		}
 	}
 	return nil
 }

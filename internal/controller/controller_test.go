@@ -363,3 +363,35 @@ func TestRunRecordsStateAndPhaseEvents(t *testing.T) {
 		t.Errorf("persisted state = %q, want Completed", tasks[0].State)
 	}
 }
+
+// cancelRunner simulates an external cancel arriving mid-run.
+type cancelRunner struct{ cancel context.CancelFunc }
+
+func (r cancelRunner) Run(ctx context.Context, spec runner.Spec) (runner.Result, error) {
+	r.cancel()
+	return runner.Result{}, ctx.Err()
+}
+
+// An explicit cancel (context.Canceled, not a deadline) yields Cancelled, not
+// Failed (§7.4).
+func TestRunCancelledIsCancelled(t *testing.T) {
+	origin := initOrigin(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	out, err := Run(ctx,
+		Deps{Repo: repo.NewManager(t.TempDir()), Runner: cancelRunner{cancel}, Image: "x"},
+		Request{
+			TaskID: "c", Title: "x", RepoName: "devbox",
+			RepoURL: "file://" + origin, DefaultBranch: "main",
+			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
+			WorkDir: t.TempDir(),
+		})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out.State != StateCancelled {
+		t.Errorf("state = %q, want Cancelled", out.State)
+	}
+	if out.Error != "cancelled" {
+		t.Errorf("error = %q, want cancelled", out.Error)
+	}
+}

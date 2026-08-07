@@ -43,6 +43,12 @@ func main() {
 		err = runLs(os.Args[2:])
 	case "run":
 		err = runRun(os.Args[2:])
+	case "submit":
+		err = runSubmit(os.Args[2:])
+	case "cancel":
+		err = runCancel(os.Args[2:])
+	case "status":
+		err = runStatus(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", os.Args[1])
 		usage()
@@ -62,8 +68,74 @@ usage:
 	agent-task serve [--config PATH]	start the daemon (Unix socket)
 	agent-task repos [--socket PATH]	list registered repositories
 	agent-task ls [--socket PATH]	list tasks
-	agent-task run --task TEXT --repo-url URL [--agent claude]	run an agent task (M3)
+	agent-task run --task TEXT --repo-url URL [--agent claude]	run an agent task locally (M3)
+	agent-task submit --repo NAME --agent NAME (--task TEXT | --issue N)	queue a task on the daemon
+	agent-task cancel ID [--socket PATH]	cancel a running task
+	agent-task status ID [--socket PATH]	show a task's state + events
 `)
+}
+
+// runSubmit queues a task on the daemon over the socket.
+func runSubmit(args []string) error {
+	fs := flag.NewFlagSet("submit", flag.ExitOnError)
+	socket := fs.String("socket", config.DefaultSocketPath, "daemon socket path")
+	repoName := fs.String("repo", "", "registered repo name")
+	agentName := fs.String("agent", "claude", "agent adapter: claude|mock")
+	taskText := fs.String("task", "", "free-form task text")
+	issueNum := fs.Int("issue", 0, "GitHub issue number")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *repoName == "" {
+		return fmt.Errorf("--repo is required")
+	}
+	if (*taskText == "") == (*issueNum == 0) {
+		return fmt.Errorf("exactly one of --task or --issue is required")
+	}
+	id, err := client.New(*socket).Submit(*repoName, *agentName, *taskText, *issueNum)
+	if err != nil {
+		return err
+	}
+	fmt.Println(id)
+	return nil
+}
+
+// runCancel cancels a running task by id.
+func runCancel(args []string) error {
+	fs := flag.NewFlagSet("cancel", flag.ExitOnError)
+	socket := fs.String("socket", config.DefaultSocketPath, "daemon socket path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: agent-task cancel <id>")
+	}
+	if err := client.New(*socket).Cancel(fs.Arg(0)); err != nil {
+		return err
+	}
+	fmt.Println("cancelling", fs.Arg(0))
+	return nil
+}
+
+// runStatus shows a task's state and audit events.
+func runStatus(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	socket := fs.String("socket", config.DefaultSocketPath, "daemon socket path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: agent-task status <id>")
+	}
+	task, events, err := client.New(*socket).Status(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("id:     %s\nstate:  %s\nsource: %s\n\nevents:\n", task.ID, task.State, task.Source)
+	for _, e := range events {
+		fmt.Printf("  %s  %-8s %s\n", e.TS.Format(time.RFC3339), e.Type, e.Message)
+	}
+	return nil
 }
 
 // runRun executes a single agent task end-to-end (M3). Standalone, in-process;

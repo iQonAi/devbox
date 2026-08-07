@@ -2,19 +2,41 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/iQonAi/devbox/internal/store"
 )
 
-// Server holds what the handlers need. M0 is read-only; task creation lands in M1
-type Server struct {
-	store *store.Store
+var (
+	errNoSubmitter  = errors.New("task submission is not available on this server")
+	errTaskNotFound = errors.New("task not found")
+)
+
+// SubmitRequest is the body of POST /v1/tasks.
+type SubmitRequest struct {
+	Repo  string `json:"repo"`
+	Agent string `json:"agent"`
+	Task  string `json:"task,omitempty"`
+	Issue int    `json:"issue,omitempty"`
 }
 
-func NewServer(s *store.Store) *Server {
-	return &Server{store: s}
+// Submitter enqueues and cancels tasks. Implemented by the daemon; nil for the
+// read-only server (M0/M1 tests).
+type Submitter interface {
+	Submit(SubmitRequest) (taskID string, err error)
+	Cancel(taskID string) error
+}
+
+// Server holds what the handlers need.
+type Server struct {
+	store *store.Store
+	sub   Submitter
+}
+
+func NewServer(s *store.Store, sub Submitter) *Server {
+	return &Server{store: s, sub: sub}
 }
 
 // Handler builds the route table. http.ServeMux is the stdlib router; modern Go
@@ -24,7 +46,70 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/healthz", s.handleHealthz)
 	mux.HandleFunc("GET /v1/repos", s.handleRepos)
 	mux.HandleFunc("GET /v1/tasks", s.handleTasks)
+	mux.HandleFunc("GET /v1/tasks/{id}", s.handleTaskStatus)
+	mux.HandleFunc("POST /v1/tasks", s.handleSubmit)
+	mux.HandleFunc("POST /v1/tasks/{id}/cancel", s.handleCancel)
 	return mux
+}
+
+func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
+	if s.sub == nil {
+		writeError(w, http.StatusServiceUnavailable, errNoSubmitter)
+		return
+	}
+	var sr SubmitRequest
+	if err := json.NewDecoder(r.Body).Decode(&sr); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	id, err := s.sub.Submit(sr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"task_id": id})
+}
+
+func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
+	if s.sub == nil {
+		writeError(w, http.StatusServiceUnavailable, errNoSubmitter)
+		return
+	}
+	if err := s.sub.Cancel(r.PathValue("id")); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
+}
+
+// handleTaskStatus returns a task plus its audit events.
+func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tasks, err := s.store.ListTasks()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	var found *store.Task
+	for i := range tasks {
+		if tasks[i].ID == id {
+			found = &tasks[i]
+			break
+		}
+	}
+	if found == nil {
+		writeError(w, http.StatusNotFound, errTaskNotFound)
+		return
+	}
+	events, err := s.store.ListEvents(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if events == nil {
+		events = []store.Event{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": found, "events": events})
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

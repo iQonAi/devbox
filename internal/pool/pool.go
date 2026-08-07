@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/iQonAi/devbox/internal/controller"
@@ -41,6 +42,25 @@ func New(ctx context.Context, run RunFunc, workers, queue int) *Pool {
 	}
 
 	return p
+}
+
+// Submit enqueues a task. It never blocks the caller: a full queue is an error,
+// not a stall (the caller is the socket handler).
+func (p *Pool) Submit(req controller.Request) error {
+	select {
+	case <-p.ctx.Done():
+		return fmt.Errorf("pool is shutting down")
+	case p.jobs <- req:
+		return nil
+	default:
+		return fmt.Errorf("task queue full")
+	}
+}
+
+// Wait blocks until all workers have exited (after the pool context is
+// cancelled). In-flight tasks are cancelled along with the context.
+func (p *Pool) Wait() {
+	p.wg.Wait()
 }
 
 // worker pulls jobs until the pool context is cancelled.

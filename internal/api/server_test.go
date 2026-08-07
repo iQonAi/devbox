@@ -18,7 +18,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-	return NewServer(s)
+	return NewServer(s, nil)
 }
 
 // get issues an in-memory request againstg the route -- no socket, no port.

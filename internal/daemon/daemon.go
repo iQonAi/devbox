@@ -9,11 +9,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/iQonAi/devbox/internal/api"
 	"github.com/iQonAi/devbox/internal/config"
+	"github.com/iQonAi/devbox/internal/controller"
+	"github.com/iQonAi/devbox/internal/pool"
 	"github.com/iQonAi/devbox/internal/repo"
+	"github.com/iQonAi/devbox/internal/runner"
 	"github.com/iQonAi/devbox/internal/store"
 )
 
@@ -38,9 +42,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	// Sweep orphaned worktrees left by terminal tasks from a previous run
-	// (crash, kill, or clean shutdown mid-task). Best-effort: a sweep failure
-	// must not stop the daemon from serving.
+	// Recover tasks left in-flight by a crash/restart: their containers and
+	// contexts are gone, so they cannot resume — fail them so the sweep can
+	// reclaim their worktrees and status is honest.
+	if n := recoverInflight(st); n > 0 {
+		slog.Warn("recovered interrupted tasks", "count", n)
+	}
+
+	// Sweep orphaned worktrees left by terminal tasks from a previous run.
+	// Best-effort: a sweep failure must not stop the daemon from serving.
 	mgr := repo.NewManager(cfg.DataDir)
 	if n, err := mgr.Sweep(ctx, st); err != nil {
 		slog.Error("orphan sweep failed", "error", err)
@@ -48,12 +58,26 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		slog.Info("orphan sweep", "removed", n)
 	}
 
+	// Pipeline deps + worker pool (D10 concurrency cap). The pool drives
+	// controller.Run for each submitted task; the store is the Recorder.
+	deps := controller.Deps{
+		Repo:     mgr,
+		Runner:   runner.NewPodmanRunner(strings.Fields(cfg.Podman), nil),
+		Image:    cfg.Image,
+		Recorder: st,
+	}
+	runFn := func(runCtx context.Context, req controller.Request) (controller.Outcome, error) {
+		return controller.Run(runCtx, deps, req)
+	}
+	p := pool.New(ctx, runFn, cfg.Limits.MaxConcurrent, 128)
+	sub := &submitter{cfg: cfg, store: st, pool: p}
+
 	ln, err := listen(cfg.SocketPath)
 	if err != nil {
 		return err
 	}
 
-	srv := &http.Server{Handler: api.NewServer(st).Handler()}
+	srv := &http.Server{Handler: api.NewServer(st, sub).Handler()}
 
 	// Serve blocks forever, so run it alongside and let either it or ctx end us.
 	// Buffered, so the goroutine can exit even if nobody reads the error.
@@ -79,13 +103,34 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		slog.Warn("sd_notify STOPPING failed", "error", err)
 	}
 
-	// Bounded grace period fo rin-flight requests, then drop them.
+	// Bounded grace period for in-flight requests, then drop them.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
+	// Workers were cancelled with ctx; wait for them to drain.
+	p.Wait()
 	return nil
+}
+
+// recoverInflight fails any task left in a non-terminal state by a previous
+// daemon (crash or restart). Returns how many were recovered.
+func recoverInflight(st *store.Store) int {
+	tasks, err := st.ListTasks()
+	if err != nil {
+		slog.Error("recover: list tasks", "error", err)
+		return 0
+	}
+	n := 0
+	for _, t := range tasks {
+		if t.State == store.StateCreated || t.State == store.StateRunning {
+			_ = st.UpdateTaskState(t.ID, store.StateFailed)
+			_ = st.InsertEvent(t.ID, store.EventState, "->Failed: interrupted by daemon restart")
+			n++
+		}
+	}
+	return n
 }
 
 // seedRepos mirrors the static config registry (D11) into the store, so the
