@@ -87,14 +87,21 @@ func (s *submitter) Submit(sr api.SubmitRequest) (string, error) {
 	}
 	_ = s.store.InsertEvent(taskID, store.EventState, "Created")
 
-	// Per-task scratch, agentbox-accessible (M5 hardens to a shared group in the
-	// deploy step; single-user host makes world-access acceptable meanwhile).
-	workDir := filepath.Join(s.cfg.DataDir, "work", taskID)
+	// Per-task scratch under the shared work root (agentbox-accessible; the root
+	// is setgid to a shared group so both the daemon uid and the container uid
+	// reach it). 2770 + setgid propagates the group to podman-written files, so
+	// the daemon can read back what agentbox wrote. Falls back to data_dir/work
+	// for local/test runs where the two uids are the same.
+	workRoot := s.cfg.WorkDir
+	if workRoot == "" {
+		workRoot = filepath.Join(s.cfg.DataDir, "work")
+	}
+	workDir := filepath.Join(workRoot, taskID)
 	for _, d := range []string{workDir, filepath.Join(workDir, "out")} {
-		if err := os.MkdirAll(d, 0o777); err != nil {
+		if err := os.MkdirAll(d, 0o770); err != nil {
 			return "", err
 		}
-		if err := os.Chmod(d, 0o777); err != nil {
+		if err := os.Chmod(d, os.ModeSetgid|0o770); err != nil {
 			return "", err
 		}
 	}

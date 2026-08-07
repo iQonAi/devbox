@@ -24,6 +24,7 @@ const (
 type Config struct {
 	SocketPath string                 `yaml:"socket_path"`
 	DataDir    string                 `yaml:"data_dir"`
+	WorkDir    string                 `yaml:"work_dir"` // shared scratch root (agentbox-accessible); "" = data_dir/work
 	Image      string                 `yaml:"image"`
 	Podman     string                 `yaml:"podman"`
 	Limits     Limits                 `yaml:"limits"`
