@@ -30,16 +30,19 @@ type Agent interface {
 	Command(method AuthMethod, promptPath, transcriptPath string) (string, error)
 }
 
+// adapters maps each registered agent name to its constructor. Lookup and the
+// adapter-contract parity suite both consume it, so registering an agent here
+// fails the suite until a matching contract case is added.
+var adapters = map[string]func() Agent{
+	"claude": Claude,
+	"pi":     Pi,
+	"mock":   Mock,
+}
+
 // Lookup returns the adapter for name, or an error if unknown.
 func Lookup(name string) (Agent, error) {
-	switch name {
-	case "claude":
-		return Claude(), nil
-	case "pi":
-		return Pi(), nil
-	case "mock":
-		return Mock(), nil
-	default:
-		return nil, fmt.Errorf("unknown agent %q", name)
+	if newAgent, ok := adapters[name]; ok {
+		return newAgent(), nil
 	}
+	return nil, fmt.Errorf("unknown agent %q", name)
 }

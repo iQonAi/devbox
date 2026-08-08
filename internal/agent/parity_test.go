@@ -5,11 +5,12 @@ import (
 	"testing"
 )
 
-// TestAdapterContractParity runs the adapter contract against every registered
-// agent so a new adapter cannot drift from the interface's documented behavior
-// (agent.go): stable Name matching the Lookup key, an env var per supported
-// auth method, errors for unsupported methods, and a Command that reads the
-// prompt file and redirects a transcript to transcriptPath.
+// TestAdapterContractParity runs the adapter contract against every agent in
+// the adapters registry (agent.go) — registering a new agent in Lookup fails
+// this suite until a contract case is added to the table below. Contract:
+// stable Name matching the Lookup key, an env var per supported auth method,
+// errors for unsupported methods, and a Command that reads the prompt file
+// and redirects a transcript to transcriptPath.
 func TestAdapterContractParity(t *testing.T) {
 	const (
 		promptPath     = "/task/prompt.md"
@@ -40,6 +41,16 @@ func TestAdapterContractParity(t *testing.T) {
 			agent:     Mock(),
 			supported: []AuthMethod{AuthSubscription, AuthAPIKey},
 		},
+	}
+
+	covered := make(map[string]bool, len(cases))
+	for _, tc := range cases {
+		covered[tc.name] = true
+	}
+	for name := range adapters {
+		if !covered[name] {
+			t.Errorf("registered agent %q has no contract case in this suite", name)
+		}
 	}
 
 	for _, tc := range cases {
@@ -97,10 +108,11 @@ func TestPiCommandFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
-	// --mode json is the machine-readable transcript; --provider anthropic binds
-	// the run to ANTHROPIC_API_KEY; the jq guard turns an in-transcript agent
-	// failure into a non-zero exit (pi's json mode alone exits 0 on model errors).
-	for _, want := range []string{"pi ", "--mode json", "--provider anthropic", "jq -es", "stopReason"} {
+	// --mode json is the machine-readable transcript; the prompt is fed via
+	// stdin so content starting with '-' or '@' is never misparsed as an
+	// option or @file; the jq guard turns an in-transcript agent failure into
+	// a non-zero exit (pi's json mode alone exits 0 on model errors).
+	for _, want := range []string{"pi ", "--mode json", "--provider anthropic", "< /task/prompt.md", "jq -es", "stopReason"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command missing %q:\n%s", want, cmd)
 		}
