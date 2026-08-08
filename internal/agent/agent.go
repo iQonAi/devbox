@@ -35,6 +35,8 @@ func Lookup(name string) (Agent, error) {
 	switch name {
 	case "claude":
 		return Claude(), nil
+	case "pi":
+		return Pi(), nil
 	case "mock":
 		return Mock(), nil
 	default:
