@@ -6,14 +6,14 @@ import "fmt"
 // binary `pi`). CLI contract researched from the pi repo docs:
 // https://github.com/earendil-works/pi (packages/coding-agent/docs/usage.md,
 // providers.md, json.md) and src/modes/print-mode.ts.
-type piAgent struct{}
+type pi struct{}
 
 // Pi returns the Pi adapter.
-func Pi() Agent { return piAgent{} }
+func Pi() Agent { return pi{} }
 
-func (piAgent) Name() string { return "pi" }
+func (pi) Name() string { return "pi" }
 
-func (piAgent) EnvVar(method AuthMethod) (string, error) {
+func (pi) EnvVar(method AuthMethod) (string, error) {
 	switch method {
 	case AuthAPIKey:
 		// Pi is multi-provider and reads one API-key env var per provider
@@ -29,7 +29,7 @@ func (piAgent) EnvVar(method AuthMethod) (string, error) {
 	}
 }
 
-func (p piAgent) Command(method AuthMethod, promptPath, transcriptPath string) (string, error) {
+func (p pi) Command(method AuthMethod, promptPath, transcriptPath string) (string, error) {
 	if _, err := p.EnvVar(method); err != nil {
 		return "", err
 	}

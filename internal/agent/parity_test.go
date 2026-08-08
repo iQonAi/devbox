@@ -80,10 +80,16 @@ func TestAdapterContractParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Command(%q): %v", m, err)
 				}
-				for _, want := range []string{promptPath, transcriptPath, "> " + transcriptPath} {
-					if !strings.Contains(cmd, want) {
-						t.Errorf("Command(%q) missing %q:\n%s", m, want, cmd)
-					}
+				if !strings.Contains(cmd, promptPath) {
+					t.Errorf("Command(%q) missing prompt path %q:\n%s", m, promptPath, cmd)
+				}
+				// The contract says "redirects a transcript to transcriptPath"
+				// without fixing the quoting, so require the path plus a `>`
+				// redirect somewhere before its first occurrence.
+				if idx := strings.Index(cmd, transcriptPath); idx < 0 {
+					t.Errorf("Command(%q) missing transcript path %q:\n%s", m, transcriptPath, cmd)
+				} else if !strings.Contains(cmd[:idx], ">") {
+					t.Errorf("Command(%q) has no `>` redirect before %q:\n%s", m, transcriptPath, cmd)
 				}
 			}
 
