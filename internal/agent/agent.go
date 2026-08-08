@@ -1,7 +1,8 @@
 // Package agent adapts coding agents to the runner behind one interface (D7,
 // §8.8). Each adapter maps an auth method to the env var the agent reads and
 // produces the shell command that runs it non-interactively against the source.
-// Claude lands here in M3; Codex (M6) and Pi prove the abstraction later.
+// Claude lands here in M3; Pi proves the abstraction in M6 (D7 amendment:
+// pi promoted over codex); Codex is deferred.
 package agent
 
 import "fmt"

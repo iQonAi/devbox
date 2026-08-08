@@ -80,7 +80,7 @@ func runSubmit(args []string) error {
 	fs := flag.NewFlagSet("submit", flag.ExitOnError)
 	socket := fs.String("socket", config.DefaultSocketPath, "daemon socket path")
 	repoName := fs.String("repo", "", "registered repo name")
-	agentName := fs.String("agent", "claude", "agent adapter: claude|mock")
+	agentName := fs.String("agent", "claude", "agent adapter: claude|pi|mock")
 	taskText := fs.String("task", "", "free-form task text")
 	issueNum := fs.Int("issue", 0, "GitHub issue number")
 	if err := fs.Parse(args); err != nil {
@@ -148,7 +148,7 @@ func runRun(args []string) error {
 	defaultBranch := fs.String("default-branch", "", "default branch (default: registry value or 'main')")
 	taskText := fs.String("task", "", "free-form task text (or use --issue)")
 	issueNum := fs.Int("issue", 0, "GitHub issue number to render into the prompt (needs --repo + token)")
-	agentName := fs.String("agent", "claude", "agent adapter: claude|mock")
+	agentName := fs.String("agent", "claude", "agent adapter: claude|pi|mock")
 	authStr := fs.String("auth", "subscription", "auth method: subscription|api_key")
 	tokenFile := fs.String("model-token-file", "", "file holding the model token; else inherit the agent's env var")
 	ghTokenFile := fs.String("github-token-file", "", "file holding the repo-scoped GitHub token; else inherit GH_TOKEN")
