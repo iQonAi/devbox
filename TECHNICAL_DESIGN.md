@@ -1,6 +1,6 @@
 # Agent Devbox — Technical Design (V1)
 
-> Status: **Design baseline — decisions approved 2026-06-18.** The 11 architectural decisions in §1.1 are settled and drive this document. Implementation has not started; this is the agreed design that code will be reviewed against.
+> Status: **Design baseline — decisions approved 2026-06-18.** The 11 architectural decisions in §1.1 are settled and drive this document. Milestones M0–M5 and the M6 pi adapter have shipped; this remains the agreed design that code is reviewed against.
 >
 > Source requirements:
 >
@@ -36,7 +36,7 @@
 | D4  | Commit transfer         | **Full transfer model.** No shared git repo with the container: host copies source _in_, agent commits locally, host extracts a `git bundle` _out_ and applies onto the feature branch host-side | §8, §9    |
 | D5  | Container runtime       | **Rootless Podman** (ships now); **gVisor (`runsc`) validated-deferred** — runner kept swappable so it can flip on later (amended 2026-06-23, see note below)                                    | §8, §10   |
 | D6  | Base image              | **Batteries-included**: Node/TS + **Bun**, Go, Python 3, plus common essentials                                                                                                                  | §8.7      |
-| D7  | Agents in V1            | **Claude Code** (M3) + **Codex** (M6) + **Pi** (open, multi-provider). Pi's **CLI is included in the base image (#7)**; its adapter is staged after Codex                                        | §8.8, §12 |
+| D7  | Agents in V1            | **Claude Code** (M3) + **Pi** (M6, open, multi-provider; CLI **included in the base image (#7)**) + **Codex** (deferred; its adapter is staged after Pi)                                         | §8.8, §12 |
 | D8  | Task input              | **Issue or free-form** (`--issue N` / `--task "…"`)                                                                                                                                              | §7, §9    |
 | D9  | Success definition      | **Agent exit 0 + ≥1 commit.** Tests run and attach to the PR but are informational                                                                                                               | §7.3      |
 | D10 | Resource limits         | **2 concurrent tasks, 30-min per-task timeout** (both config-overridable)                                                                                                                        | §5, §8.6  |
@@ -302,7 +302,7 @@ Host builds a shallow/single-branch copy at the base commit and copies it into t
 
 ### 8.8 Agent adapter interface (D7)
 
-One Go interface; each agent maps: image/command, how the prompt is passed, how to detect completion + exit code, where the transcript/summary land in `/task/out`. **Claude Code** lands in M3; **Codex** in M6 (proves the abstraction). **Pi** (open, multi-provider) has its **CLI included in the base image (#7)**; its adapter is designed-for (the interface accommodates it) and staged after Codex.
+One Go interface; each agent maps: command, how the prompt is passed, how to detect completion + exit code, where the transcript/summary land in `/task/out`. (The container image is global — D6's single base image bakes in all agent CLIs — so adapters do not map images.) **Claude Code** lands in M3; **Pi** (open, multi-provider, CLI **included in the base image (#7)**) in M6 (proves the abstraction). **Codex** is deferred (D7 amendment); its adapter is designed-for (the interface accommodates it) and staged after Pi.
 
 ### 8.9 Disposability
 
@@ -384,7 +384,7 @@ Each milestone is independently reviewable, ends in a working vertical slice, an
 - **M3 — Claude Code adapter (end-to-end agent run).** Adapter interface + Claude adapter; prompt rendering (D8); run agent against the in-container copy; extract bundle; apply onto the feature branch host-side; capture log/transcript/diff/summary; measure copy cost (OQ-4). _Demo:_ agent makes a real change in a test repo; commits land on the host feature branch; token never in container. _Tests:_ adapter contract, bundle apply, success/timeout paths.
 - **M4 — GitHub integration (host-mediated).** Issue fetch → prompt; host push; templated PR; machine-user repo-scoped token via `LoadCredential` (D3). _Demo:_ `agent-task run --repo case-tracker-fc --issue 34 --agent claude` → open PR + logs + summary + test results. _Tests:_ prompt-from-issue rendering, PR body templating, token-isolation assertion.
 - **M5 — Lifecycle, concurrency & control.** Full state machine (§7); worker pool + 2-concurrent cap (D10); `cancel`; 30-min timeout; restart recovery + orphan teardown; audit events. _Demo:_ two concurrent tasks; cancel one; restart daemon → clean recovery. _Tests:_ transitions, cancellation, concurrency cap, recovery.
-- **M6 — Codex adapter + hardening.** Pi adapter (proves the abstraction; Codex deferred — D7); security-review pass; operator runbook; `config.example.yaml`; ADRs for D1–D11. _Demo:_ same task via `--agent codex`. _Tests:_ adapter parity suite.
+- **M6 — Pi adapter + hardening.** Pi adapter (proves the abstraction; Codex deferred — D7); security-review pass; operator runbook; `config.example.yaml`; ADRs for D1–D11. _Demo:_ same task via `--agent pi`. _Tests:_ adapter parity suite.
 
 The 0001 success criterion (`agent-task run --repo case-tracker-fc --issue 34 --agent claude` → branch + PR + logs + summary + test results) is met at **M4** and hardened through **M6**.
 
@@ -400,7 +400,7 @@ The 0001 success criterion (`agent-task run --repo case-tracker-fc --issue 34 --
 | D4  | Commit transfer      | Full transfer model (copy in / bundle out)                                | Approved                           |
 | D5  | Runtime              | Rootless Podman (ships); gVisor deferred-validated (#17)                  | Approved — amended 2026-06-23 (#4) |
 | D6  | Base image           | Batteries-included: Node/TS+Bun, Go, Python 3                             | Approved                           |
-| D7  | Agents               | Claude Code + Codex + Pi; Pi CLI in base image (#7), adapter staged later | Approved — amended 2026-07-17 (#7) |
+| D7  | Agents               | Claude Code + Pi (promoted to M6) + Codex (deferred, staged after Pi); Pi CLI in base image (#7) | Approved — amended 2026-07-17 (#7), 2026-08-08 (#34: pi over codex) |
 | D8  | Task input           | Issue or free-form                                                        | Approved                           |
 | D9  | Success def          | Exit 0 + ≥1 commit; tests informational                                   | Approved                           |
 | D10 | Limits               | 2 concurrent / 30-min timeout                                             | Approved                           |
