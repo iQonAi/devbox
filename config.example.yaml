@@ -24,3 +24,6 @@ agents:
   claude:
     auth: subscription
     token_ref: claude-oauth-token
+  pi:
+    auth: api_key # pi has no non-interactive subscription auth; key is ANTHROPIC_API_KEY
+    token_ref: anthropic-api-key
