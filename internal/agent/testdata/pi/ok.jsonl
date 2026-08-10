@@ -1,0 +1,5 @@
+{"type":"agent_start","sessionId":"fixture"}
+{"type":"message_end","message":{"role":"user","content":"add a health endpoint"}}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":"Added /healthz endpoint returning 200."}}
+{"type":"agent_end"}

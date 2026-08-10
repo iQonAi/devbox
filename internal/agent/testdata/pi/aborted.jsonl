@@ -1,0 +1,4 @@
+{"type":"agent_start","sessionId":"fixture"}
+{"type":"message_end","message":{"role":"user","content":"do a thing"}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"aborted","content":"partial answer before abort"}}
+{"type":"agent_end"}

@@ -1,0 +1,5 @@
+{"type":"agent_start","sessionId":"fixture"}
+{"type":"message_end","message":{"role":"user","content":"fix the failing test"}}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"thinking","thinking":"the test asserts the old copy"},{"type":"text","text":"Implemented the fix."},{"type":"text","text":"All tests pass."}]}}
+{"type":"agent_end"}

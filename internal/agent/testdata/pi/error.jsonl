@@ -1,0 +1,5 @@
+{"type":"agent_start","sessionId":"fixture"}
+{"type":"message_end","message":{"role":"user","content":"do a thing"}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":"working on it"}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"error","content":"","errorMessage":"model call failed"}}
+{"type":"agent_end"}
