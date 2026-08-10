@@ -1,0 +1,4 @@
+{"type":"agent_start","sessionId":"fixture"}
+{"type":"message_end","message":{"role":"user","content":"do a thing"}}
+{"type":"tool_execution_start","toolName":"bash"}
+{"type":"agent_end"}

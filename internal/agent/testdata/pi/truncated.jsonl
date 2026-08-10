@@ -1,0 +1,2 @@
+{"type":"agent_start","sessionId":"fixture"}
+{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":"looks good so f
