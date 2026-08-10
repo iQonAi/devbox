@@ -9,9 +9,11 @@ limits, and agents all daemon-scoped (`internal/config/config.go:24-33`) —
 and validation hard-requires at least one registered repo
 (`internal/config/config.go:115-118`), which alone blocks a repo-less
 session (issue #42, outcome 5). The CLI enforces the same assumption
-(`cmd/agent-task/main.go:89-90`, `:169-170`). Meanwhile the resource limits
-that actually apply are literals in code, not config at all
-(`internal/daemon/submit.go:128`, `cmd/agent-task/main.go:281`).
+(`cmd/agent-task/main.go:89-90`, `:169-170`). Meanwhile the per-container
+resource caps (cpus, memory, pids) are literals in code, not config
+(`internal/daemon/submit.go:128`, `cmd/agent-task/main.go:281`);
+`limits.task_timeout` and `limits.max_concurrent` are real applied config
+(`internal/daemon/submit.go:117`, `internal/daemon/daemon.go:102`).
 
 Issue #42's goals make the session the configured object: the user decides
 its networking, agent, name, and packages per session. That turns session

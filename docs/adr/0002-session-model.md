@@ -65,7 +65,7 @@ PR, not silently added).
 
 | Decision | Verdict |
 | --- | --- |
-| D1 Go, D2 daemon+CLI/Unix socket, D3 host-only token, D5 rootless Podman, D7 adapter interface | **Hold.** D3 is reaffirmed: a durable session still gets no GitHub token. D5 holds but #17 (gVisor) gains priority — see R7. |
+| D1 Go, D2 daemon+CLI/Unix socket, D3 host-only token, D5 rootless Podman, D7 adapter interface | **Hold.** D3 is reaffirmed: a durable session still gets no GitHub token. D5 holds but #17 (gVisor) gains priority — see R7. D7 holds with one seam: an optional capability interface for resume/continue — amend ADR 0001 rather than write a new one. |
 | D4 full transfer model | **Holds, clarified:** applies per `code` task (one-shot runs unchanged); sessions do not control in-sandbox git-flow. |
 | D6 base image | **Amendment proposed** via D13 (ADR 0003): per-session provisioning under the policy ceiling. |
 | D8 task input | **Supersession proposed** via D14 (ADR 0004): input becomes kind + body + optional repo. |
@@ -97,6 +97,8 @@ Extends the residual-risk table (R1–R5) in `TECHNICAL_DESIGN.md` §1.4:
 - The runner grows from a batch call into a sandbox lifecycle
   (create/exec/destroy) with the one-shot run recomposed on top; the store
   needs a sessions record and a task→session link; the pool needs per-session
-  serialization. Sequencing per the #42 review.
+  serialization; the agent adapter gains an optional resume/continue
+  capability (an amendment to ADR 0001, not a new ADR). Sequencing per the
+  #42 review.
 - Container visibility (read-only log tail; PTY attach) is deliberately not
   part of this ADR — see ADR 0004's future-work note.

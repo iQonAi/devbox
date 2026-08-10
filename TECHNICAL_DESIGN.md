@@ -356,7 +356,7 @@ Allowed: dev creds, repo creds, model API keys. Prohibited: production/cloud-adm
 
 ### 10.5 Approval gates
 
-The only outbound write to GitHub is _push branch + open PR_. No merge/deploy/infra/secret changes by the platform. Everything else is human, via PR review.
+The only outbound writes to GitHub are _push branch, open PR, and a best-effort back-link comment on the source issue_. No merge/deploy/infra/secret changes by the platform. Everything else is human, via PR review.
 
 ### 10.6 Compromise success criteria
 

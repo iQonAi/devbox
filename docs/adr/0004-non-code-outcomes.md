@@ -17,10 +17,14 @@ expressed.
 
 Sessions (ADR 0002) are sandboxes first: evals and security assessments
 involve no git at all. The owner also pinned the approval-gate question:
-"PR review gates everything" was only ever true because push-branch +
-open-PR is the platform's sole outbound write
-(`internal/controller/controller.go:334`) — the property is real, but it is
-a property of **repo-based tasks**, not of all session activity.
+"PR review gates everything" was only ever true because the platform's
+outbound writes are exactly branch push, PR open, and a best-effort
+back-link comment on the source issue
+(`internal/controller/controller.go:334-356`) — the property is real, but
+it is a property of **repo-based tasks**, not of all session activity.
+The issue back-link (`internal/github/github.go:155`) is already a
+platform-authored comment shipping today; the future host-mediated actions
+named below are additions beyond it, not the first of their kind.
 
 **Task kind** and **`plain` task** are new terms; the repo has no
 `CONTEXT.md` glossary yet to hold them (flagged on the PR).
