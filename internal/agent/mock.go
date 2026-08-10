@@ -17,9 +17,13 @@ func (mock) Name() string { return "mock" }
 func (mock) EnvVar(AuthMethod) (string, error) { return "MOCK_TOKEN", nil }
 
 func (mock) Command(_ AuthMethod, promptPath, transcriptPath string) (string, error) {
+	// The summary write sits before the commit so the snippet's exit status
+	// stays the commit's — same contract as the real adapters, which re-raise
+	// the agent status after their best-effort extraction.
 	return fmt.Sprintf(
-		`cat %s > %s; printf 'change by mock agent\n' > mock_change.txt; `+
+		`cat %[1]s > %[2]s; printf 'summary by mock agent\n' > %[3]s; `+
+			`printf 'change by mock agent\n' > mock_change.txt; `+
 			`git add mock_change.txt; git commit -qm 'mock: apply change'`,
-		promptPath, transcriptPath,
+		promptPath, transcriptPath, summaryPath(transcriptPath),
 	), nil
 }

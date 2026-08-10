@@ -5,7 +5,10 @@
 // pi promoted over codex); Codex is deferred.
 package agent
 
-import "fmt"
+import (
+	"fmt"
+	"path"
+)
 
 // AuthMethod is how an agent authenticates to its model. Subscription uses an
 // OAuth token (Claude/Codex); api_key uses a provider API key (Pi, or as an
@@ -26,9 +29,20 @@ type Agent interface {
 	EnvVar(method AuthMethod) (string, error)
 	// Command returns a shell snippet — run via `bash -c`, with the source repo
 	// as the working directory — that runs the agent non-interactively against
-	// the prompt at promptPath and writes its transcript to transcriptPath. It
-	// must exit non-zero when the agent fails.
+	// the prompt at promptPath, writes its transcript to transcriptPath, and
+	// best-effort extracts the PR summary into summary.txt next to the
+	// transcript (each adapter knows its own transcript shape; the controller's
+	// wrapper stays agent-agnostic). It must exit non-zero when the agent
+	// fails, and the summary step must never change that exit status.
 	Command(method AuthMethod, promptPath, transcriptPath string) (string, error)
+}
+
+// summaryPath is where a Command snippet writes the PR summary: summary.txt as
+// a sibling of the transcript, derived from the transcriptPath argument so it
+// follows the out dir wherever the controller puts it. path (not filepath):
+// these are in-container POSIX paths regardless of host OS.
+func summaryPath(transcriptPath string) string {
+	return path.Dir(transcriptPath) + "/summary.txt"
 }
 
 // adapters maps each registered agent name to its constructor. Lookup and the
