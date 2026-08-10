@@ -23,9 +23,21 @@ evals or security assessments with no git involvement at all), memory stays
 per-session and lightweight, concurrency is left to sessions, and session
 lifetime is literal.
 
-Terms used here — **session**, **sandbox**, **one-shot run** — are defined
-below; the repo has no `CONTEXT.md` glossary yet to hold them (flagged on the
-PR, not silently added).
+On 2026-08-10 the owner added a direction comment on #42 pinning the
+session's operating model: sessions should be durable the way a watcher loop
+is durable — "a long running task that watches for changes and picks up the
+work then works on it … Take the github abstraction out of it and you have a
+devbox container session that's running performing tasks that it's assigned.
+What they are and where they come from is abstracted away." The referenced
+watcher is a host-side script (not repo code); its mechanics are the pattern
+this ADR adopts: a durable outer loop with cheap idle polling, change
+detection by comparing current state against a captured baseline, hand-off of
+the delta when something changes, and a bounded lease under a supervisor
+rather than an unsupervised immortal process.
+
+Terms used here — **session**, **sandbox**, **work loop**, **one-shot run** —
+are defined below; the repo has no `CONTEXT.md` glossary yet to hold them
+(flagged on the PR, not silently added).
 
 ## Decision
 
@@ -33,9 +45,41 @@ PR, not silently added).
   one persistent volume, with its own config (ADR 0003), an **optional** repo
   binding, and per-session agent memory. The session model must not assume a
   repo — a session with no git involvement is a first-class case.
-- Lifecycle is **create → exec → close**: tasks are units of work executed
-  *inside* a session via exec, each keeping its own id, events, artifacts,
-  and terminal state. Task kinds and their outcomes are ADR 0004.
+- Lifecycle is **create → work loop → close**. While open, the session runs
+  a durable **work loop**: wait idle → notice an assigned task → pick it up →
+  execute → report → return to idle. Tasks are units of work executed
+  *inside* the session, each keeping its own id, events, artifacts, and
+  terminal state; the session executes them **serially from its queue**.
+  Task kinds and their outcomes are ADR 0004.
+- The loop carries the watcher pattern's properties (owner direction,
+  2026-08-10):
+  - **Cheap idle wait** — an idle session costs a poll, not compute.
+  - **Baseline/delta pickup** — the session picks up work by comparing the
+    queue against what it has already handled and taking the delta; pickup is
+    level-triggered on queue state, not edge-triggered on a missable
+    notification, so assigned work survives restarts and races.
+  - **Bounded lease under supervision** — the loop periodically proves
+    liveness to the daemon and is re-armed, rather than being trusted to run
+    unsupervised forever. The lease is the loop's health-check contract with
+    the daemon, **not** a session lifetime bound: lifetime stays literal
+    (below); a lease lapse means the daemon intervenes on a wedged loop, not
+    that a healthy session expires.
+- **Task sources are abstracted from the session.** The session's contract is
+  "execute tasks assigned to it"; what the tasks are and where they come from
+  is not the session's concern. The v1 source is explicit user assignment
+  (CLI → daemon → session queue). Watcher-style sources — GitHub, filesystem,
+  queues — are future sources that plug in on the daemon side without
+  changing the session contract. Per D3, GitHub specifics stay host-side: a
+  future GitHub watcher source lives in the host/daemon, never as a token or
+  poller inside the container.
+- **The assignment mechanism is an open question** for the implementation
+  ADR/milestone: the daemon may push each queued task into the container via
+  exec, or an in-container supervisor may pull from the session queue. The
+  contract above (assigned tasks, serial execution, loop semantics) is the
+  decided part; the owner's phrasing ("a long running task that watches …
+  picks up the work") leans pull, but the load-bearing requirement is the
+  source abstraction, and either mechanism satisfies the contract. The
+  runner's sandbox exec primitive is needed under both.
 - **Lifetime is literal:** a session stays alive until the user closes it.
   No max lifetime, no idle reaping in this version of the model. Lifetime
   bounds are named future work, not deferred defaults.
@@ -95,10 +139,14 @@ Extends the residual-risk table (R1–R5) in `TECHNICAL_DESIGN.md` §1.4:
 ## Consequences
 
 - The runner grows from a batch call into a sandbox lifecycle
-  (create/exec/destroy) with the one-shot run recomposed on top; the store
-  needs a sessions record and a task→session link; the pool needs per-session
-  serialization; the agent adapter gains an optional resume/continue
-  capability (an amendment to ADR 0001, not a new ADR). Sequencing per the
-  #42 review.
+  (create/exec/destroy) — exec is the runner primitive either assignment
+  mechanism needs — with the one-shot run recomposed on top; the store needs
+  a sessions record, a task→session link, and a **per-session task queue**
+  the work loop consumes; the daemon needs an **assignment path**
+  (submit-to-session) alongside today's one-shot submit; the pool needs
+  per-session serialization; the loop needs an **event surface** (idle,
+  pickup, report, lease renewal) so the CLI can show what a session is doing;
+  and the agent adapter gains an optional resume/continue capability (an
+  amendment to ADR 0001, not a new ADR). Sequencing per the #42 review.
 - Container visibility (read-only log tail; PTY attach) is deliberately not
   part of this ADR — see ADR 0004's future-work note.

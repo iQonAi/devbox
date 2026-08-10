@@ -405,7 +405,7 @@ The 0001 success criterion (`agent-task run --repo case-tracker-fc --issue 34 --
 | D9  | Success def          | Exit 0 + ≥1 commit; tests informational                                   | Approved — supersession proposed 2026-08-09 (#42, D14/ADR 0004) |
 | D10 | Limits               | 2 concurrent / 30-min timeout                                             | Approved — amendment proposed 2026-08-09 (#42, D12/ADR 0002: limits scope to task execution; session residency unbounded) |
 | D11 | Repo resolution      | Static allowlist in config                                                | Approved — amendment proposed 2026-08-09 (#42, D13/ADR 0003: registry stays the allowlist; repo optional, ≥1-repo requirement drops) |
-| D12 | Session model        | Durable sandbox sessions (create/exec/close); tasks execute inside; lifetime literal (until closed); per-session memory | Proposed 2026-08-09 (#42, ADR 0002) |
+| D12 | Session model        | Durable sandbox sessions running a work loop (idle → pick up assigned task → execute → report); task sources abstracted (v1: user assignment); lifetime literal (until closed); per-session memory | Proposed 2026-08-09, direction updated 2026-08-10 (#42, ADR 0002) |
 | D13 | Config scoping       | Per-session config under a host policy ceiling; repo an optional session property | Proposed 2026-08-09 (#42, ADR 0003) |
 | D14 | Task outcomes        | Task kinds `code`/`plain`; kind owns the success predicate; PR gate scoped to repo-linked `code` tasks | Proposed 2026-08-09 (#42, ADR 0004) |
 
