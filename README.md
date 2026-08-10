@@ -63,8 +63,14 @@ Build the agent base image (rootless, as the container-runner user — see
 
 ```bash
 cd images/base
-podman build --dns 9.9.9.9 -t devbox-agent-base:dev .
+sudo -u agentbox env HOME=/home/agentbox XDG_RUNTIME_DIR=/run/user/999 \
+  podman build --dns 9.9.9.9 -t devbox-agent-base:dev .
 ```
+
+The `sudo -u agentbox env …` prefix matters: the image must land in the
+container-runner user's rootless storage, or the daemon's podman cannot see
+it and tasks fail at container create. On a dev machine where you run podman
+as yourself, a plain `podman build` is fine.
 
 ### Running the daemon as a systemd service
 
@@ -112,7 +118,9 @@ repos:
     token_ref: gh-token-devbox     # LoadCredential secret name, not the token itself
 
 image: localhost/devbox-agent-base:dev
-podman: podman                    # or a wrapper, e.g. "sudo -u agentbox podman"
+podman: podman                    # dev; production uses the cross-user wrapper:
+                                  #   "sudo -u agentbox /usr/local/sbin/agentbox-podman"
+                                  # (the sudoers NOPASSWD rule matches only that path)
 
 agents:
   claude:
@@ -134,8 +142,9 @@ Start the daemon (reads `/etc/agent-task/config.yaml` by default, or
 agent-task serve --config /etc/agent-task/config.yaml
 ```
 
-From another shell (or another host, over the socket the operator can reach —
-see the runbook's Tailscale section), submit and track tasks:
+From another shell on the same host (the daemon listens on a Unix socket only —
+no TCP; for remote use, SSH to the host over Tailscale and run the CLI there,
+per the runbook), submit and track tasks:
 
 ```bash
 # list repos registered in the config
@@ -158,8 +167,10 @@ agent-task status <task-id>
 agent-task cancel <task-id>
 ```
 
-All CLI commands accept `--socket PATH` to point at a non-default socket
-(default: `/run/agent-task/agent-task.sock`).
+The client commands (`repos`, `ls`, `submit`, `status`, `cancel`) accept
+`--socket PATH` to point at a non-default socket (default:
+`/run/agent-task/agent-task.sock`); `serve` takes its socket from the
+config's `socket_path`, and `run` uses no socket at all.
 
 ### Standalone (`run`, no daemon)
 
