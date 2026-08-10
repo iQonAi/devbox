@@ -40,7 +40,13 @@ func TestClaudeCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
-	for _, want := range []string{"claude -p", "/task/prompt.md", "--output-format json", "--dangerously-skip-permissions", "/task/out/transcript.json"} {
+	// The trailing pieces are the adapter-owned summary extraction (#36):
+	// best-effort .result jq into summary.txt, then the agent status re-raised
+	// so extraction never masks a claude failure.
+	for _, want := range []string{
+		"claude -p", "/task/prompt.md", "--output-format json", "--dangerously-skip-permissions", "/task/out/transcript.json",
+		"jq -r '.result // empty'", "> /task/out/summary.txt", `(exit "$AGENT_STATUS")`,
+	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command missing %q:\n%s", want, cmd)
 		}
@@ -62,7 +68,7 @@ func TestMockCommandCommits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
-	for _, want := range []string{"/task/prompt.md", "mock_change.txt", "git commit"} {
+	for _, want := range []string{"/task/prompt.md", "mock_change.txt", "git commit", "> /task/out/summary.txt"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("mock command missing %q:\n%s", want, cmd)
 		}

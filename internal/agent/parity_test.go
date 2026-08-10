@@ -9,12 +9,15 @@ import (
 // the adapters registry (agent.go) — registering a new agent in Lookup fails
 // this suite until a contract case is added to the table below. Contract:
 // stable Name matching the Lookup key, an env var per supported auth method,
-// errors for unsupported methods, and a Command that reads the prompt file
-// and redirects a transcript to transcriptPath.
+// errors for unsupported methods, and a Command that reads the prompt file,
+// redirects a transcript to transcriptPath, and redirects a summary to
+// summary.txt next to the transcript (#36: summary extraction is
+// adapter-owned; the controller's wrapper has no agent-specific parsing).
 func TestAdapterContractParity(t *testing.T) {
 	const (
 		promptPath     = "/task/prompt.md"
 		transcriptPath = "/task/out/transcript.json"
+		summaryTarget  = "/task/out/summary.txt"
 	)
 
 	cases := []struct {
@@ -91,6 +94,11 @@ func TestAdapterContractParity(t *testing.T) {
 				} else if !strings.Contains(cmd[:idx], ">") {
 					t.Errorf("Command(%q) has no `>` redirect before %q:\n%s", m, transcriptPath, cmd)
 				}
+				// The summary obligation: a `>` redirect targeting summary.txt
+				// as a sibling of the transcript.
+				if !strings.Contains(cmd, "> "+summaryTarget) {
+					t.Errorf("Command(%q) does not redirect a summary to %q:\n%s", m, summaryTarget, cmd)
+				}
 			}
 
 			for _, m := range tc.unsupported {
@@ -117,8 +125,14 @@ func TestPiCommandFlags(t *testing.T) {
 	// --mode json is the machine-readable transcript; the prompt is fed via
 	// stdin so content starting with '-' or '@' is never misparsed as an
 	// option or @file; the jq guard turns an in-transcript agent failure into
-	// a non-zero exit (pi's json mode alone exits 0 on model errors).
-	for _, want := range []string{"pi ", "--mode json", "--provider anthropic", "< /task/prompt.md", "jq -es", "stopReason"} {
+	// a non-zero exit (pi's json mode alone exits 0 on model errors); the
+	// summary comes from the last assistant message_end's content (string or
+	// text blocks), and the agent status is re-raised after extraction.
+	for _, want := range []string{
+		"pi ", "--mode json", "--provider anthropic", "< /task/prompt.md",
+		"jq -es", "stopReason",
+		"jq -rs", "message_end", "> /task/out/summary.txt", `(exit "$AGENT_STATUS")`,
+	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command missing %q:\n%s", want, cmd)
 		}

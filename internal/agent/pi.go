@@ -47,18 +47,25 @@ func (p pi) Command(method AuthMethod, promptPath, transcriptPath string) (strin
 	//   --mode json: emits the session as JSON-lines events on stdout — the
 	//     machine-readable transcript (docs/json.md). Non-interactive modes
 	//     show no trust prompt and there are no per-tool permission prompts to
-	//     skip (docs/usage.md). NOTE: this JSONL shape is not what the
-	//     controller's summary extraction expects (wrapper.go's
-	//     `jq '.result // empty'` assumes claude's single-object transcript),
-	//     so summary.txt stays empty for pi runs — follow-up in M6 hardening.
+	//     skip (docs/usage.md).
 	//   jq guard: in --mode json pi exits 0 even when the model call fails —
 	//     only text mode maps stopReason error/aborted to exit 1
 	//     (src/modes/print-mode.ts) — so the run fails unless the transcript's
 	//     last assistant message_end exists and did not stop on error/aborted.
+	//   Summary: the last assistant message_end event carries the final
+	//     assistant message; its .message.content is either a plain string or
+	//     an array of content blocks, whose text fields are joined. Extraction
+	//     is best-effort (`|| true`, stderr dropped) and runs even when the run
+	//     failed; the captured status is re-raised so the summary step never
+	//     masks the guarded exit code.
 	return fmt.Sprintf(
 		`pi --provider anthropic --mode json < %[1]s > %[2]s && `+
 			`jq -es 'map(select(.type == "message_end" and .message.role == "assistant")) | last as $m | `+
-			`$m != null and (($m.message.stopReason // "") | IN("error", "aborted") | not)' %[2]s > /dev/null`,
-		promptPath, transcriptPath,
+			`$m != null and (($m.message.stopReason // "") | IN("error", "aborted") | not)' %[2]s > /dev/null; `+
+			`AGENT_STATUS=$?; `+
+			`jq -rs 'map(select(.type == "message_end" and .message.role == "assistant")) | last | .message.content // "" | `+
+			`if type == "array" then map(.text // empty) | join("\n") else . end' %[2]s > %[3]s 2>/dev/null || true; `+
+			`(exit "$AGENT_STATUS")`,
+		promptPath, transcriptPath, summaryPath(transcriptPath),
 	), nil
 }
