@@ -17,11 +17,11 @@ before implementing. Key approved decisions (see its Decision Log, D1–D11):
   as a `git bundle` the host applies onto an `agent/*` feature branch.
 - **GitHub:** token is host-only; host pushes the branch and opens the PR.
 - **Runtime stack in the agent image:** Node/TS + Bun, Go, Python 3.
-- **Agents:** Claude Code, then Codex (Pi deferred).
+- **Agents:** Claude Code, then Pi (Codex deferred).
 - **Persistence:** SQLite.
 
-Implementation has not started. Build milestone by milestone (M0 first), per the
-TECHNICAL_DESIGN milestones; do not write code ahead of an approved milestone.
+Milestones M0–M5 and the M6 pi adapter have shipped. Build milestone by milestone, per
+the TECHNICAL_DESIGN milestones; do not write code ahead of an approved milestone.
 
 ## Agent skills
 
