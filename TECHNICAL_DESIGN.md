@@ -399,14 +399,17 @@ The 0001 success criterion (`agent-task run --repo case-tracker-fc --issue 34 --
 | D3  | Token location       | Host-only                                                                 | Approved                           |
 | D4  | Commit transfer      | Full transfer model (copy in / bundle out)                                | Approved                           |
 | D5  | Runtime              | Rootless Podman (ships); gVisor deferred-validated (#17)                  | Approved — amended 2026-06-23 (#4) |
-| D6  | Base image           | Batteries-included: Node/TS+Bun, Go, Python 3                             | Approved                           |
+| D6  | Base image           | Batteries-included: Node/TS+Bun, Go, Python 3                             | Approved — amendment proposed 2026-08-09 (#42, D13/ADR 0003) |
 | D7  | Agents               | Claude Code + Pi (promoted to M6) + Codex (deferred, staged after Pi); Pi CLI in base image (#7) | Approved — amended 2026-07-17 (#7), 2026-08-08 (#34: pi over codex) |
-| D8  | Task input           | Issue or free-form                                                        | Approved                           |
-| D9  | Success def          | Exit 0 + ≥1 commit; tests informational                                   | Approved                           |
-| D10 | Limits               | 2 concurrent / 30-min timeout                                             | Approved                           |
-| D11 | Repo resolution      | Static allowlist in config                                                | Approved                           |
+| D8  | Task input           | Issue or free-form                                                        | Approved — supersession proposed 2026-08-09 (#42, D14/ADR 0004) |
+| D9  | Success def          | Exit 0 + ≥1 commit; tests informational                                   | Approved — supersession proposed 2026-08-09 (#42, D14/ADR 0004) |
+| D10 | Limits               | 2 concurrent / 30-min timeout                                             | Approved — amendment proposed 2026-08-09 (#42, D12/ADR 0002: limits scope to task execution; session residency unbounded) |
+| D11 | Repo resolution      | Static allowlist in config                                                | Approved — amendment proposed 2026-08-09 (#42, D13/ADR 0003: registry stays the allowlist; repo optional, ≥1-repo requirement drops) |
+| D12 | Session model        | Durable sandbox sessions (create/exec/close); tasks execute inside; lifetime literal (until closed); per-session memory | Proposed 2026-08-09 (#42, ADR 0002) |
+| D13 | Config scoping       | Per-session config under a host policy ceiling; repo an optional session property | Proposed 2026-08-09 (#42, ADR 0003) |
+| D14 | Task outcomes        | Task kinds `code`/`plain`; kind owns the success predicate; PR gate scoped to repo-linked `code` tasks | Proposed 2026-08-09 (#42, ADR 0004) |
 
-ADRs for D1–D11 to be written in `docs/adr/` during M6 (or earlier if a decision is revisited).
+ADRs for D1–D11 to be written in `docs/adr/` during M6 (or earlier if a decision is revisited); ADR 0001 covers D7, and ADRs 0002–0004 (Proposed, #42) cover D12–D14.
 
 ---
 
