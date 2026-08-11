@@ -13,8 +13,11 @@ already be in the image or be installable by the agent at task time
 through the egress-filtered network. A minimal image would push toolchain
 installs into every task run — slow, flaky, and repeated per task, since
 containers are disposable and never reused (`TECHNICAL_DESIGN.md:309`).
-The registered repos span Node/TypeScript, Go, and Python, so the image
-carries all three plus the agent CLIs.
+The decision targets Node/TypeScript, Go, and Python as the supported
+stacks (`TECHNICAL_DESIGN.md:38`), so the image carries all three plus
+the agent CLIs. (Inference: the source docs do not name the registered
+repos' languages; the stack list is the decision's own scope, not an
+observation about the registry.)
 
 ## Decision
 
