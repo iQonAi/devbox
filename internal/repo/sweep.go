@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 // worktreeSZtore is the slice of the sotre the sweeper needs. An interface, not

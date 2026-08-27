@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/iQonAi/devbox/internal/gitx"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/gitx"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 // tokenEnvVar carries the credential to git's helper thorugh the environment,

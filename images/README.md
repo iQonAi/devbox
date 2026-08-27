@@ -1,6 +1,6 @@
 # Agent images
 
-Container images for the Devbox platform. Today this is the single **agent base
+Container images for the Agent-Task platform. Today this is the single **agent base
 image** (`base/`) that disposable execution containers run from (design D6,
 §8.7). One task = one container, started from this image; the agent inside is
 treated as untrusted code.
@@ -42,7 +42,7 @@ build needs the public one (see the runbook / #4):
 ```bash
 cd images/base
 sudo -u agentbox env HOME=/home/agentbox XDG_RUNTIME_DIR=/run/user/999 \
-  podman build --dns 9.9.9.9 -t devbox-agent-base:dev .
+  podman build --dns 9.9.9.9 -t agent-task-base:dev .
 ```
 
 The final `RUN` is a **smoke-test gate**: it invokes every tool (`node`, `npm`,

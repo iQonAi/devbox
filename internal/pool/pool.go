@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/controller"
+	"github.com/iQonAi/agent-task/internal/controller"
 )
 
 // RunFunc executes one task under a per-task cancellable context.

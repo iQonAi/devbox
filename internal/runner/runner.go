@@ -22,7 +22,7 @@ const (
 // is applied unconditionally by the runner.
 type Spec struct {
 	Name       string            // task id; forms the container/volume name (safe chars only)
-	Image      string            // e.g. localhost/devbox-agent-base:dev
+	Image      string            // e.g. localhost/agent-task-base:dev
 	Cmd        []string          // command run inside; writes artifacts to OutPath
 	SourceDir  string            // host dir (a git repo) copied into SrcPath
 	PromptFile string            // host file copied read-only to /task/prompt.md; "" = none

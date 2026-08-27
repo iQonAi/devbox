@@ -1,6 +1,6 @@
-# devbox
+# agent-task
 
-## Project: Agent Devbox
+## Project: Agent-Task
 
 Self-hosted platform for running coding agents in isolated, disposable execution
 environments. One task = one branch = one container; agents are treated as

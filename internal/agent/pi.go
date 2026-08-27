@@ -17,7 +17,7 @@ func (pi) EnvVar(method AuthMethod) (string, error) {
 	switch method {
 	case AuthAPIKey:
 		// Pi is multi-provider and reads one API-key env var per provider
-		// (docs/providers.md); ANTHROPIC_API_KEY is its Anthropic key. Devbox
+		// (docs/providers.md); ANTHROPIC_API_KEY is its Anthropic key. Agent-Task
 		// runs pi against Anthropic — Command pins --provider anthropic so this
 		// is the credential pi resolves.
 		return "ANTHROPIC_API_KEY", nil

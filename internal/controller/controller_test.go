@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/agent"
-	"github.com/iQonAi/devbox/internal/gitx"
-	"github.com/iQonAi/devbox/internal/prompt"
-	"github.com/iQonAi/devbox/internal/repo"
-	"github.com/iQonAi/devbox/internal/runner"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/agent"
+	"github.com/iQonAi/agent-task/internal/gitx"
+	"github.com/iQonAi/agent-task/internal/prompt"
+	"github.com/iQonAi/agent-task/internal/repo"
+	"github.com/iQonAi/agent-task/internal/runner"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 // localRunner simulates the container on the host: it applies the agent's effect
@@ -73,7 +73,7 @@ func TestRunCompletesAndAppliesCommits(t *testing.T) {
 	out, err := Run(context.Background(),
 		Deps{Repo: repo.NewManager(t.TempDir()), Runner: localRunner{exitCode: 0}, Image: "unused"},
 		Request{
-			TaskID: "task-1", Title: "add change", RepoName: "devbox",
+			TaskID: "task-1", Title: "add change", RepoName: "agent-task",
 			RepoURL: "file://" + origin, DefaultBranch: "main",
 			Prompt: prompt.Input{Task: "make a change"},
 			Agent:  agent.Mock(), AuthMethod: agent.AuthAPIKey,
@@ -113,7 +113,7 @@ func TestRunTimeoutIsFailed(t *testing.T) {
 	out, err := Run(context.Background(),
 		Deps{Repo: repo.NewManager(t.TempDir()), Runner: blockedRunner{}, Image: "x"},
 		Request{
-			TaskID: "task-timeout", Title: "x", RepoName: "devbox",
+			TaskID: "task-timeout", Title: "x", RepoName: "agent-task",
 			RepoURL: "file://" + origin, DefaultBranch: "main",
 			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
 			WorkDir: t.TempDir(),
@@ -149,7 +149,7 @@ func TestRunApplyFailureSurfacesError(t *testing.T) {
 	out, err := Run(context.Background(),
 		Deps{Repo: repo.NewManager(t.TempDir()), Runner: badBundleRunner{}, Image: "x"},
 		Request{
-			TaskID: "task-badbundle", Title: "x", RepoName: "devbox",
+			TaskID: "task-badbundle", Title: "x", RepoName: "agent-task",
 			RepoURL: "file://" + origin, DefaultBranch: "main",
 			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
 			WorkDir: t.TempDir(),
@@ -192,7 +192,7 @@ func TestRunRejectsSymlinkArtifacts(t *testing.T) {
 	out, err := Run(context.Background(),
 		Deps{Repo: repo.NewManager(t.TempDir()), Runner: symlinkRunner{target: secret}, Image: "x"},
 		Request{
-			TaskID: "task-symlink", Title: "x", RepoName: "devbox",
+			TaskID: "task-symlink", Title: "x", RepoName: "agent-task",
 			RepoURL: "file://" + origin, DefaultBranch: "main",
 			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
 			WorkDir: t.TempDir(),
@@ -220,7 +220,7 @@ func TestRunFailsOnNonzeroAgent(t *testing.T) {
 	out, err := Run(context.Background(),
 		Deps{Repo: repo.NewManager(t.TempDir()), Runner: localRunner{exitCode: 1}, Image: "x"},
 		Request{
-			TaskID: "task-2", Title: "x", RepoName: "devbox",
+			TaskID: "task-2", Title: "x", RepoName: "agent-task",
 			RepoURL: "file://" + origin, DefaultBranch: "main",
 			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
 			WorkDir: t.TempDir(),
@@ -253,8 +253,8 @@ func TestGitHubTokenNeverReachesRunner(t *testing.T) {
 	out, err := Run(context.Background(),
 		Deps{Repo: repo.NewManager(t.TempDir()), Runner: cr, Image: "x"},
 		Request{
-			TaskID: "tok", RepoName: "devbox", RepoURL: "file://" + origin, DefaultBranch: "main",
-			Owner: "iQonAi", Repo: "devbox", GitHubToken: secret,
+			TaskID: "tok", RepoName: "agent-task", RepoURL: "file://" + origin, DefaultBranch: "main",
+			Owner: "iQonAi", Repo: "agent-task", GitHubToken: secret,
 			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
 			WorkDir: t.TempDir(),
 		})
@@ -305,7 +305,7 @@ func TestRunRecordsStateAndPhaseEvents(t *testing.T) {
 
 	// The task must exist first (FK); the daemon creates it before running
 	if err := st.UpsertRepo(store.Repo{
-		Name:          "devbox",
+		Name:          "agent-task",
 		Owner:         "o",
 		Repo:          "r",
 		DefaultBranch: "main",
@@ -328,7 +328,7 @@ func TestRunRecordsStateAndPhaseEvents(t *testing.T) {
 		Request{
 			TaskID:        "task-ev",
 			Title:         "add change",
-			RepoName:      "devbox",
+			RepoName:      "agent-task",
 			RepoURL:       "file://" + origin,
 			DefaultBranch: "main",
 			Prompt:        prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
@@ -446,7 +446,7 @@ func TestRunCancelledIsCancelled(t *testing.T) {
 	out, err := Run(ctx,
 		Deps{Repo: repo.NewManager(t.TempDir()), Runner: cancelRunner{cancel}, Image: "x"},
 		Request{
-			TaskID: "c", Title: "x", RepoName: "devbox",
+			TaskID: "c", Title: "x", RepoName: "agent-task",
 			RepoURL: "file://" + origin, DefaultBranch: "main",
 			Prompt: prompt.Input{Task: "t"}, Agent: agent.Mock(), AuthMethod: agent.AuthAPIKey,
 			WorkDir: t.TempDir(),

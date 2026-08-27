@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/iQonAi/devbox/internal/gitx"
+	"github.com/iQonAi/agent-task/internal/gitx"
 )
 
 // Worktree is a checked-out feature branch on the host, one per task.

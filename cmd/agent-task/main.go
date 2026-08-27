@@ -13,15 +13,15 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/agent"
-	"github.com/iQonAi/devbox/internal/client"
-	"github.com/iQonAi/devbox/internal/config"
-	"github.com/iQonAi/devbox/internal/controller"
-	"github.com/iQonAi/devbox/internal/daemon"
-	"github.com/iQonAi/devbox/internal/prompt"
-	"github.com/iQonAi/devbox/internal/repo"
-	"github.com/iQonAi/devbox/internal/runner"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/agent"
+	"github.com/iQonAi/agent-task/internal/client"
+	"github.com/iQonAi/agent-task/internal/config"
+	"github.com/iQonAi/agent-task/internal/controller"
+	"github.com/iQonAi/agent-task/internal/daemon"
+	"github.com/iQonAi/agent-task/internal/prompt"
+	"github.com/iQonAi/agent-task/internal/repo"
+	"github.com/iQonAi/agent-task/internal/runner"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 const defaultConfigPath = "/etc/agent-task/config.yaml"
@@ -62,7 +62,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `agent-task - devbox orchestrator
+	fmt.Fprint(os.Stderr, `agent-task - coding agent orchestrator
 
 usage:
 	agent-task serve [--config PATH]	start the daemon (Unix socket)
@@ -152,7 +152,7 @@ func runRun(args []string) error {
 	authStr := fs.String("auth", "subscription", "auth method: subscription|api_key")
 	tokenFile := fs.String("model-token-file", "", "file holding the model token; else inherit the agent's env var")
 	ghTokenFile := fs.String("github-token-file", "", "file holding the repo-scoped GitHub token; else inherit GH_TOKEN")
-	image := fs.String("image", "localhost/devbox-agent-base:dev", "agent base image")
+	image := fs.String("image", "localhost/agent-task-base:dev", "agent base image")
 	podman := fs.String("podman", "podman", "podman command, e.g. 'sudo -u agentbox /usr/local/sbin/agentbox-podman'")
 	dataDir := fs.String("data-dir", "", "mirror cache dir (default: config data_dir)")
 	workDir := fs.String("work-dir", "", "scratch dir for this run (default: a fresh temp dir)")

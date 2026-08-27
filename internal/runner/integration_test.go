@@ -6,7 +6,7 @@
 //	RUNNER_PODMAN_BASE="sudo -u agentbox /usr/local/sbin/agentbox-podman" \
 //	  go test -tags integration ./internal/runner -v
 //
-// RUNNER_IMAGE overrides the base image (default localhost/devbox-agent-base:dev).
+// RUNNER_IMAGE overrides the base image (default localhost/agent-task-base:dev).
 package runner
 
 import (
@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iQonAi/devbox/internal/gitx"
+	"github.com/iQonAi/agent-task/internal/gitx"
 )
 
 func podmanBase() []string {
@@ -31,7 +31,7 @@ func image() string {
 	if v := os.Getenv("RUNNER_IMAGE"); v != "" {
 		return v
 	}
-	return "localhost/devbox-agent-base:dev"
+	return "localhost/agent-task-base:dev"
 }
 
 // openDir returns a world-accessible temp dir. t.TempDir() is 0700 and owned by

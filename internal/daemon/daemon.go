@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/api"
-	"github.com/iQonAi/devbox/internal/config"
-	"github.com/iQonAi/devbox/internal/controller"
-	"github.com/iQonAi/devbox/internal/pool"
-	"github.com/iQonAi/devbox/internal/repo"
-	"github.com/iQonAi/devbox/internal/runner"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/api"
+	"github.com/iQonAi/agent-task/internal/config"
+	"github.com/iQonAi/agent-task/internal/controller"
+	"github.com/iQonAi/agent-task/internal/pool"
+	"github.com/iQonAi/agent-task/internal/repo"
+	"github.com/iQonAi/agent-task/internal/runner"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 const (

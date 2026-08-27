@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iQonAi/devbox/internal/gitx"
-	"github.com/iQonAi/devbox/internal/prompt"
+	"github.com/iQonAi/agent-task/internal/gitx"
+	"github.com/iQonAi/agent-task/internal/prompt"
 )
 
 // tokenEnvVar carries the token to git's credential helper via the environment.

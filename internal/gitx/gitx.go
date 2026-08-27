@@ -12,8 +12,8 @@ import (
 // Identity used for any commit git creates host-side. Ambien config is
 // disabled, so without this git would fail with "empty ident name".
 const (
-	authorName  = "devbox"
-	authorEmail = "devbox@localhost"
+	authorName  = "agent-task"
+	authorEmail = "agent-task@localhost"
 )
 
 // Run executes git in dir and returns trimmed stdout.

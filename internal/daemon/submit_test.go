@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/iQonAi/devbox/internal/api"
-	"github.com/iQonAi/devbox/internal/config"
-	"github.com/iQonAi/devbox/internal/controller"
-	"github.com/iQonAi/devbox/internal/pool"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/api"
+	"github.com/iQonAi/agent-task/internal/config"
+	"github.com/iQonAi/agent-task/internal/controller"
+	"github.com/iQonAi/agent-task/internal/pool"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 func TestSubmitCreatesTaskAndEnqueues(t *testing.T) {
@@ -31,18 +31,18 @@ func TestSubmitCreatesTaskAndEnqueues(t *testing.T) {
 	cfg := &config.Config{
 		DataDir: t.TempDir(),
 		Limits:  config.Limits{MaxConcurrent: 1, TaskTimeout: "30m"},
-		Repos:   []config.Repo{{Name: "devbox", Owner: "iQonAi", Repo: "devbox", DefaultBranch: "main", TokenRef: "gh"}},
+		Repos:   []config.Repo{{Name: "agent-task", Owner: "iQonAi", Repo: "agent-task", DefaultBranch: "main", TokenRef: "gh"}},
 		Agents:  map[string]config.AgentConfig{"mock": {Auth: "api_key", TokenRef: "model"}},
 	}
 	s := &submitter{cfg: cfg, store: st, pool: p}
 
-	id, err := s.Submit(api.SubmitRequest{Repo: "devbox", Agent: "mock", Task: "do a thing"})
+	id, err := s.Submit(api.SubmitRequest{Repo: "agent-task", Agent: "mock", Task: "do a thing"})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 
 	req := <-got
-	if req.TaskID != id || req.RepoName != "devbox" || req.Title != "do a thing" {
+	if req.TaskID != id || req.RepoName != "agent-task" || req.Title != "do a thing" {
 		t.Errorf("enqueued req = %+v", req)
 	}
 	tasks, _ := st.ListTasks()
@@ -53,7 +53,7 @@ func TestSubmitCreatesTaskAndEnqueues(t *testing.T) {
 	if _, err := s.Submit(api.SubmitRequest{Repo: "nope", Agent: "mock", Task: "x"}); err == nil {
 		t.Error("expected error for unknown repo")
 	}
-	if _, err := s.Submit(api.SubmitRequest{Repo: "devbox", Agent: "ghost", Task: "x"}); err == nil {
+	if _, err := s.Submit(api.SubmitRequest{Repo: "agent-task", Agent: "ghost", Task: "x"}); err == nil {
 		t.Error("expected error for unconfigured agent")
 	}
 }
@@ -187,16 +187,16 @@ func TestCancelQueuedRecordsCancelled(t *testing.T) {
 	cfg := &config.Config{
 		DataDir: t.TempDir(),
 		Limits:  config.Limits{MaxConcurrent: 1, TaskTimeout: "30m"},
-		Repos:   []config.Repo{{Name: "devbox", Owner: "iQonAi", Repo: "devbox", DefaultBranch: "main", TokenRef: "gh"}},
+		Repos:   []config.Repo{{Name: "agent-task", Owner: "iQonAi", Repo: "agent-task", DefaultBranch: "main", TokenRef: "gh"}},
 		Agents:  map[string]config.AgentConfig{"mock": {Auth: "api_key", TokenRef: "model"}},
 	}
 	s := &submitter{cfg: cfg, store: st, pool: p}
 
-	if _, err := s.Submit(api.SubmitRequest{Repo: "devbox", Agent: "mock", Task: "hold the worker"}); err != nil {
+	if _, err := s.Submit(api.SubmitRequest{Repo: "agent-task", Agent: "mock", Task: "hold the worker"}); err != nil {
 		t.Fatalf("submit 1: %v", err)
 	}
 	<-started
-	queuedID, err := s.Submit(api.SubmitRequest{Repo: "devbox", Agent: "mock", Task: "stay queued"})
+	queuedID, err := s.Submit(api.SubmitRequest{Repo: "agent-task", Agent: "mock", Task: "stay queued"})
 	if err != nil {
 		t.Fatalf("submit 2: %v", err)
 	}

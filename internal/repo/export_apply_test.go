@@ -14,7 +14,7 @@ func TestExportAndApplyRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	_, url := initOrigin(t)
 	m := NewManager(t.TempDir())
-	mirror, err := m.Sync(ctx, "devbox", url, "")
+	mirror, err := m.Sync(ctx, "agent-task", url, "")
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestApplyBundleRejectsNonFastForward(t *testing.T) {
 	ctx := context.Background()
 	_, url := initOrigin(t)
 	m := NewManager(t.TempDir())
-	mirror, err := m.Sync(ctx, "devbox", url, "")
+	mirror, err := m.Sync(ctx, "agent-task", url, "")
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}

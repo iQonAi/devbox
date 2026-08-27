@@ -1,6 +1,6 @@
 [Unit]
-Description=agent-task orchestrator daemon (devbox)
-Documentation=https://github.com/iQonAi/devbox
+Description=agent-task orchestrator daemon
+Documentation=https://github.com/iQonAi/agent-task
 After=network-online.target
 Wants=network-online.target
 
@@ -39,7 +39,7 @@ StateDirectoryMode=0700
 # tokens are minted with the org `iQonAi` as resource owner (see the runbook).
 # Deferred repos add one line each as they join the org; the per-agent model API
 # key (M3) is wired the same way.
-LoadCredential=gh-token-devbox:/etc/agent-task/credentials/gh-token-devbox
+LoadCredential=gh-token-agent-task:/etc/agent-task/credentials/gh-token-agent-task
 # Per-agent model credential (M5), named by the config agents.<name>.token_ref:
 LoadCredential=claude-oauth-token:/etc/agent-task/credentials/claude-oauth-token
 #LoadCredential=gh-token-claude-agent-config:/etc/agent-task/credentials/gh-token-claude-agent-config

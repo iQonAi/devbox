@@ -18,9 +18,9 @@ func write(t *testing.T, name, content string) {
 }
 
 func TestGetReadsCredential(t *testing.T) {
-	write(t, "gh-token-devbox", "github_pat_example\n")
+	write(t, "gh-token-agent-task", "github_pat_example\n")
 
-	token, ok, err := Get("gh-token-devbox")
+	token, ok, err := Get("gh-token-agent-task")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestGetReadsCredential(t *testing.T) {
 func TestMissingCredentialIsNotAnError(t *testing.T) {
 	write(t, "other", "x")
 
-	_, ok, err := Get("gh-token-devbox")
+	_, ok, err := Get("gh-token-agent-task")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestMissingCredentialIsNotAnError(t *testing.T) {
 func TestNoCredentialsDirectory(t *testing.T) {
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 
-	_, ok, err := Get("gh-token-devbox")
+	_, ok, err := Get("gh-token-agent-task")
 	if err != nil || ok {
 		t.Errorf("got (ok=%v, err=%v), want (false, nil)", ok, err)
 	}
@@ -60,15 +60,15 @@ func TestNoCredentialsDirectory(t *testing.T) {
 
 // An empty file is a file a real misconfiguration and must not look like "no token".
 func TestEmptyCredentialIsAnError(t *testing.T) {
-	write(t, "gh-token-devbox", "\n")
+	write(t, "gh-token-agent-task", "\n")
 
-	if _, _, err := Get("gh-token-devbox"); err == nil {
+	if _, _, err := Get("gh-token-agent-task"); err == nil {
 		t.Fatal("expected an error for an empty credential, got nil")
 	}
 }
 
 func TestRefCannotEscapeDirectory(t *testing.T) {
-	write(t, "gh-token-devbox", "x")
+	write(t, "gh-token-agent-task", "x")
 
 	for _, ref := range []string{"../../etc/passwd", "sub/token", ""} {
 		if _, _, err := Get(ref); err == nil {
