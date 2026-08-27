@@ -180,7 +180,7 @@ func TestSetMirrorPathUnknownRepo(t *testing.T) {
 	}
 }
 
-// seedRepo inserts one repo and returns it's id.
+// seedRepo inserts one repo and returns its id.
 func seedRepo(t *testing.T, s *Store) int64 {
 	t.Helper()
 	if err := s.UpsertRepo(Repo{Name: "agent-task", Owner: "iQonAi", Repo: "agent-task", DefaultBranch: "main", TokenRef: "t"}); err != nil {

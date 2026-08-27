@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Identity used for any commit git creates host-side. Ambien config is
+// Identity used for any commit git creates host-side. Ambient config is
 // disabled, so without this git would fail with "empty ident name".
 const (
 	authorName  = "agent-task"
