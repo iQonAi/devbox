@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/agent"
-	"github.com/iQonAi/devbox/internal/api"
-	"github.com/iQonAi/devbox/internal/config"
-	"github.com/iQonAi/devbox/internal/controller"
-	"github.com/iQonAi/devbox/internal/creds"
-	"github.com/iQonAi/devbox/internal/pool"
-	"github.com/iQonAi/devbox/internal/prompt"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/agent"
+	"github.com/iQonAi/agent-task/internal/api"
+	"github.com/iQonAi/agent-task/internal/config"
+	"github.com/iQonAi/agent-task/internal/controller"
+	"github.com/iQonAi/agent-task/internal/creds"
+	"github.com/iQonAi/agent-task/internal/pool"
+	"github.com/iQonAi/agent-task/internal/prompt"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 // submitter builds a controller.Request from an API submission — resolving

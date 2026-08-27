@@ -1,4 +1,4 @@
-# Agent Devbox — Technical Design (V1)
+# Agent-Task — Technical Design (V1)
 
 > Status: **Design baseline — decisions approved 2026-06-18.** The 11 architectural decisions in §1.1 are settled and drive this document. Milestones M0–M5 and the M6 pi adapter have shipped; this remains the agreed design that code is reviewed against.
 >
@@ -64,7 +64,7 @@ Approved low-stakes defaults:
 The two decisions that moved furthest from the first draft, and why:
 
 - **D3 + D4 (host-only token, full transfer model).** The untrusted container now shares **no git repository and no token** with the host. It receives a self-contained copy of the source, produces local commits, and emits an inert `git bundle`. The host is the sole writer to the real repo and the sole holder of the token. This closes the `.git`-hook escape class entirely: there is no agent-writable `.git` that a host git command ever reads or executes. The only secret that must exist inside the container is the **model API key** (the agent has to call the model) — rotatable, scoped, not infrastructure.
-- **D5 (rootless Podman; gVisor deferred).** Rootless Podman removes the root daemon, so a break-out lands unprivileged rather than as host root — the property that matters on a box sitting next to the home LAN. gVisor would add a userspace kernel so the agent's syscalls never hit the host kernel directly; that layer is deferred to a validation spike (#17) because the runner is swappable and the Devbox VM is already a hypervisor guest. The first-shipped protection against reaching the home network is the **egress deny-list** (R2/§8.5), which is independent of the runtime.
+- **D5 (rootless Podman; gVisor deferred).** Rootless Podman removes the root daemon, so a break-out lands unprivileged rather than as host root — the property that matters on a box sitting next to the home LAN. gVisor would add a userspace kernel so the agent's syscalls never hit the host kernel directly; that layer is deferred to a validation spike (#17) because the runner is swappable and the Agent-Task VM is already a hypervisor guest. The first-shipped protection against reaching the home network is the **egress deny-list** (R2/§8.5), which is independent of the runtime.
 
 ### 1.4 Residual risks (tracked)
 
@@ -111,7 +111,7 @@ Still genuinely open: see §3.
 Single Go module, single binary `agent-task` (with a `serve` subcommand for the daemon). Internal packages map to the components in 0002.
 
 ```
-devbox/
+agent-task/
 ├── cmd/
 │   └── agent-task/            # CLI + `serve` (daemon) entrypoint
 ├── internal/
@@ -145,7 +145,7 @@ devbox/
 ## 5. Runtime architecture
 
 ```
- ┌─────────────┐  Tailscale   ┌──────────────────────── Devbox VM ─────────────────────────┐
+ ┌─────────────┐  Tailscale   ┌────────────────────── Agent-Task VM ───────────────────────┐
  │ User device │ ───SSH────►  │  agent-task (CLI) ──unix socket──► agent-taskd (daemon)      │
  └─────────────┘              │                                       │                       │
                               │                       ┌───────────────┴───────────────┐       │

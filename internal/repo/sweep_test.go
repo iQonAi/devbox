@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 // realStore gives a store backed by a temp DB with one repo whose mirror is
@@ -21,14 +21,14 @@ func realStore(t *testing.T) (*store.Store, *Manager, string) {
 
 	_, url := initOrigin(t)
 	m := NewManager(t.TempDir())
-	mirror, err := m.Sync(context.Background(), "devbox", url, "")
+	mirror, err := m.Sync(context.Background(), "agent-task", url, "")
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if err := s.UpsertRepo(store.Repo{Name: "devbox", Owner: "iQonAi", Repo: "devbox", DefaultBranch: "main", TokenRef: "t"}); err != nil {
+	if err := s.UpsertRepo(store.Repo{Name: "agent-task", Owner: "iQonAi", Repo: "agent-task", DefaultBranch: "main", TokenRef: "t"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := s.SetMirrorPath("devbox", mirror); err != nil {
+	if err := s.SetMirrorPath("agent-task", mirror); err != nil {
 		t.Fatalf("set mirror: %v", err)
 	}
 	return s, m, mirror

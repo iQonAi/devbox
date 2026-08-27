@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/config"
+	"github.com/iQonAi/agent-task/internal/config"
 )
 
 func TestRunServesOverSocket(t *testing.T) {
@@ -20,8 +20,8 @@ func TestRunServesOverSocket(t *testing.T) {
 		SocketPath: sock,
 		DataDir:    dir,
 		Repos: []config.Repo{{
-			Name: "devbox", Owner: "iQonAi", Repo: "devbox",
-			DefaultBranch: "main", TokenRef: "gh-token-devbox",
+			Name: "agent-task", Owner: "iQonAi", Repo: "agent-task",
+			DefaultBranch: "main", TokenRef: "gh-token-agent-task",
 		}},
 	}
 
@@ -52,8 +52,8 @@ func TestRunServesOverSocket(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(repos) != 1 || repos[0].Name != "devbox" {
-		t.Fatalf("got %+v, want the seeded devbox repo", repos)
+	if len(repos) != 1 || repos[0].Name != "agent-task" {
+		t.Fatalf("got %+v, want the seeded agent-task repo", repos)
 	}
 
 	cancel()

@@ -9,14 +9,14 @@ limits:
   task_timeout: 30m
 
 repos:
-  - name: devbox
+  - name: agent-task
     owner: iQonAi
-    repo: devbox
+    repo: agent-task
     default_branch: main
-    token_ref: gh-token-devbox
+    token_ref: gh-token-agent-task
 
 # Agent base image and the podman command (the cross-user wrapper on the VM).
-image: localhost/devbox-agent-base:dev
+image: localhost/agent-task-base:dev
 podman: "sudo -u agentbox /usr/local/sbin/agentbox-podman"
 
 # Per-agent auth policy. token_ref names a LoadCredential secret (never the key).

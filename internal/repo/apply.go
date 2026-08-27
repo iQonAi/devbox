@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/iQonAi/devbox/internal/gitx"
+	"github.com/iQonAi/agent-task/internal/gitx"
 )
 
 // ApplyResult reports what a bundle apply landed on the feature branch.

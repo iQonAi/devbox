@@ -12,7 +12,7 @@ func syncedMirror(t *testing.T) (m *Manager, mirrorPath string) {
 	t.Helper()
 	_, url := initOrigin(t)
 	m = NewManager(t.TempDir())
-	path, err := m.Sync(context.Background(), "devbox", url, "")
+	path, err := m.Sync(context.Background(), "agent-task", url, "")
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}

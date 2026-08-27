@@ -79,7 +79,7 @@ func TestIdentityIsSelfContained(t *testing.T) {
 	if err != nil {
 		t.Fatalf("log: %v", err)
 	}
-	if got != "devbox <devbox@localhost>" {
+	if got != "agent-task <agent-task@localhost>" {
 		t.Errorf("author = %q", got)
 	}
 }

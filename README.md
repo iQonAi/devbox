@@ -1,4 +1,4 @@
-# Agent Devbox
+# Agent-Task
 
 Self-hosted platform for running coding agents (Claude Code, Pi) in isolated,
 disposable containers. One task = one branch = one container; agents are
@@ -31,7 +31,7 @@ for the full design and `docs/project/` for the underlying requirements.
 
 - **Go** 1.26+ (to build `agent-task`)
 - **Linux** with rootless Podman configured (subuid/subgid ranges, unprivileged
-  user namespaces) — see `docs/runbook/0001-devbox-vm.md` for a worked
+  user namespaces) — see `docs/runbook/0001-agent-task-vm.md` for a worked
   example of provisioning a host
 - The **agent base image** built from `images/base/Dockerfile` (Node/TS + Bun,
   Go, Python 3, and the agent CLIs) — see `images/README.md`
@@ -46,8 +46,8 @@ for the full design and `docs/project/` for the underlying requirements.
 Build the binary from source:
 
 ```bash
-git clone https://github.com/iQonAi/devbox.git
-cd devbox
+git clone https://github.com/iQonAi/agent-task.git
+cd agent-task
 go build -o agent-task ./cmd/agent-task
 sudo install -m 0755 agent-task /usr/local/bin/agent-task
 ```
@@ -64,7 +64,7 @@ Build the agent base image (rootless, as the container-runner user — see
 ```bash
 cd images/base
 sudo -u agentbox env HOME=/home/agentbox XDG_RUNTIME_DIR=/run/user/999 \
-  podman build --dns 9.9.9.9 -t devbox-agent-base:dev .
+  podman build --dns 9.9.9.9 -t agent-task-base:dev .
 ```
 
 The `sudo -u agentbox env …` prefix matters: the image must land in the
@@ -93,7 +93,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now agent-taskd
 ```
 
-See `docs/runbook/0001-devbox-vm.md` for the full host setup (Podman, the
+See `docs/runbook/0001-agent-task-vm.md` for the full host setup (Podman, the
 egress deny-list, credential provisioning).
 
 ## Configuration
@@ -111,13 +111,13 @@ limits:
   task_timeout: 30m
 
 repos:
-  - name: devbox
+  - name: agent-task
     owner: iQonAi
-    repo: devbox
+    repo: agent-task
     default_branch: main
-    token_ref: gh-token-devbox     # LoadCredential secret name, not the token itself
+    token_ref: gh-token-agent-task     # LoadCredential secret name, not the token itself
 
-image: localhost/devbox-agent-base:dev
+image: localhost/agent-task-base:dev
 podman: podman                    # dev; production uses the cross-user wrapper:
                                   #   "sudo -u agentbox /usr/local/sbin/agentbox-podman"
                                   # (the sudoers NOPASSWD rule matches only that path)
@@ -151,11 +151,11 @@ per the runbook), submit and track tasks:
 agent-task repos
 
 # queue a task against a GitHub issue
-agent-task submit --repo devbox --agent claude --issue 40
+agent-task submit --repo agent-task --agent claude --issue 40
 # -> prints a task id
 
 # or queue free-form work instead of an issue
-agent-task submit --repo devbox --agent claude --task "Add a --verbose flag to ls"
+agent-task submit --repo agent-task --agent claude --task "Add a --verbose flag to ls"
 
 # list tasks
 agent-task ls
@@ -192,7 +192,7 @@ Or against a registered repo, fetching the prompt from a GitHub issue
 
 ```bash
 agent-task run --config /etc/agent-task/config.yaml \
-  --repo devbox --issue 40 --agent claude \
+  --repo agent-task --issue 40 --agent claude \
   --github-token-file /path/to/gh-token
 ```
 
@@ -217,5 +217,5 @@ codebase is built against.
 
 - `TECHNICAL_DESIGN.md` — architecture, decisions, and milestones
 - `docs/project/` — vision, system architecture, and the security/threat model
-- `docs/runbook/0001-devbox-vm.md` — operator runbook for provisioning a host
+- `docs/runbook/0001-agent-task-vm.md` — operator runbook for provisioning a host
 - `images/README.md` — agent base image contents and build/update process

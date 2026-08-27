@@ -1,8 +1,8 @@
-# 0001 - Agent Devbox Platform Vision & Product Requirements
+# 0001 - Agent-Task Platform Vision & Product Requirements
 
 ## Overview
 
-Agent Devbox is a self-hosted platform for running autonomous coding agents in isolated execution environments.
+Agent-Task is a self-hosted platform for running autonomous coding agents in isolated execution environments.
 
 The platform allows a user to create development sessions from any device connected through Tailscale. Each session receives a dedicated workspace and disposable execution environment where coding agents can perform implementation work with elevated permissions without risking the user's workstation, personal files, home infrastructure, or production systems.
 
@@ -73,7 +73,7 @@ All changes must flow through pull request review.
 
 ## Success Criteria
 
-A user can SSH into the devbox and execute:
+A user can SSH into the Agent-Task VM and execute:
 
 agent-task run --repo case-tracker-fc --issue 34 --agent claude
 

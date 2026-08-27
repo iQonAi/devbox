@@ -93,7 +93,7 @@ func TestUpsertAndListRepos(t *testing.T) {
 		}
 	}
 
-	must("devbox", "iQonAi")
+	must("agent-task", "iQonAi")
 	must("app", "iQonAi")
 
 	repos, err := s.ListRepos()
@@ -105,19 +105,19 @@ func TestUpsertAndListRepos(t *testing.T) {
 		t.Fatalf("got %d repos, want 2", len(repos))
 	}
 
-	if repos[0].Name != "app" || repos[1].Name != "devbox" {
-		t.Errorf("order = %q,%q; want app, devbox", repos[0].Name, repos[1].Name)
+	if repos[0].Name != "agent-task" || repos[1].Name != "app" {
+		t.Errorf("order = %q,%q; want agent-task, app", repos[0].Name, repos[1].Name)
 	}
 
-	// Re-upsert "devbox" with a new owner; must UPDATE, not create a duplicate.
-	must("devbox", "changed")
+	// Re-upsert "agent-task" with a new owner; must UPDATE, not create a duplicate.
+	must("agent-task", "changed")
 
 	repos, _ = s.ListRepos()
 	if len(repos) != 2 {
 		t.Fatalf("after re-upsert got %d, want 2 (no duplicate)", len(repos))
 	}
 	for _, r := range repos {
-		if r.Name == "devbox" && r.Owner != "changed" {
+		if r.Name == "agent-task" && r.Owner != "changed" {
 			t.Errorf("owner not updated: %q", r.Owner)
 		}
 	}
@@ -146,11 +146,11 @@ func TestSetMirrorPathSurvivesUpsert(t *testing.T) {
 	}
 	defer s.Close()
 
-	base := Repo{Name: "devbox", Owner: "iQonAi", Repo: "devbox", DefaultBranch: "main", TokenRef: "t"}
+	base := Repo{Name: "agent-task", Owner: "iQonAi", Repo: "agent-task", DefaultBranch: "main", TokenRef: "t"}
 	if err := s.UpsertRepo(base); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := s.SetMirrorPath("devbox", "/var/lib/agent-task/mirrors/devbox.git"); err != nil {
+	if err := s.SetMirrorPath("agent-task", "/var/lib/agent-task/mirrors/agent-task.git"); err != nil {
 		t.Fatalf("set mirror path: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestSetMirrorPathSurvivesUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if repos[0].MirrorPath != "/var/lib/agent-task/mirrors/devbox.git" {
+	if repos[0].MirrorPath != "/var/lib/agent-task/mirrors/agent-task.git" {
 		t.Errorf("mirror_path clobbered by upsert: %q", repos[0].MirrorPath)
 	}
 }
@@ -180,13 +180,13 @@ func TestSetMirrorPathUnknownRepo(t *testing.T) {
 	}
 }
 
-// seedRepo inserts one repo and returns it's id.
+// seedRepo inserts one repo and returns its id.
 func seedRepo(t *testing.T, s *Store) int64 {
 	t.Helper()
-	if err := s.UpsertRepo(Repo{Name: "devbox", Owner: "iQonAi", Repo: "devbox", DefaultBranch: "main", TokenRef: "t"}); err != nil {
+	if err := s.UpsertRepo(Repo{Name: "agent-task", Owner: "iQonAi", Repo: "agent-task", DefaultBranch: "main", TokenRef: "t"}); err != nil {
 		t.Fatalf("seed repo: %v", err)
 	}
-	if err := s.SetMirrorPath("devbox", "/mirrors/devbox.git"); err != nil {
+	if err := s.SetMirrorPath("agent-task", "/mirrors/agent-task.git"); err != nil {
 		t.Fatalf("set mirror: %v", err)
 	}
 	repos, _ := s.ListRepos()
@@ -295,7 +295,7 @@ func TestSweepableTasksOnlyTerminalWithWorktree(t *testing.T) {
 	ids := map[string]bool{}
 	for _, task := range got {
 		ids[task.ID] = true
-		if task.MirrorPath != "/mirrors/devbox.git" {
+		if task.MirrorPath != "/mirrors/agent-task.git" {
 			t.Errorf("%s mirror = %q", task.ID, task.MirrorPath)
 		}
 	}
@@ -368,7 +368,7 @@ func TestSetTaskPRURL(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	url := "https://github.com/iQonAi/devbox/pull/42"
+	url := "https://github.com/iQonAi/agent-task/pull/42"
 	if err := s.SetTaskPRURL("task-1", url); err != nil {
 		t.Fatalf("set pr_url: %v", err)
 	}

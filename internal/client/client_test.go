@@ -26,7 +26,7 @@ func TestReposDecodes(t *testing.T) {
 		if r.URL.Path != "/v1/repos" {
 			t.Errorf("path = %q, want /v1/repos", r.URL.Path)
 		}
-		w.Write([]byte(`[{"name":"devbox","owner":"iQonAi","repo":"devbox","default_branch":"main"}]`))
+		w.Write([]byte(`[{"name":"agent-task","owner":"iQonAi","repo":"agent-task","default_branch":"main"}]`))
 	}))
 
 	repos, err := New(sock).Repos()

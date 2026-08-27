@@ -1,4 +1,4 @@
-module github.com/iQonAi/devbox
+module github.com/iQonAi/agent-task
 
 go 1.26.2
 

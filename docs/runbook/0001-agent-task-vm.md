@@ -1,6 +1,6 @@
-# 0001 — Devbox VM Operator Runbook
+# 0001 — Agent-Task VM Operator Runbook
 
-Operator (HITL) procedures for the Devbox VM that hosts the agent orchestrator
+Operator (HITL) procedures for the Agent-Task VM that hosts the agent orchestrator
 and execution containers. This VM is provisioned and maintained **by hand**: the
 agent platform must never have Proxmox access (`docs/project/0003`). Proxmox is
 human-only.
@@ -76,7 +76,7 @@ out-of-band. Security invariant (`docs/project/0003`): Tailscale serves
 
 - Installed via `curl -fsSL https://tailscale.com/install.sh | sh`; joined with
   `sudo tailscale up` — **no** `--advertise-routes`, **no** `--advertise-exit-node`.
-- Tailnet IP: `100.x.y.<redacted>` (host `devbox`).
+- Tailnet IP: `100.x.y.<redacted>` (host `agent-task`).
 - Host-only scoping confirmed: not an exit node, no subnet routes advertised,
   `ExitNodeAllowLANAccess=false` (`tailscale debug prefs`). Tailscale does not
   bridge the home LAN into the tailnet.
@@ -88,7 +88,7 @@ out-of-band. Security invariant (`docs/project/0003`): Tailscale serves
 
 - sshd listens on all interfaces (`0.0.0.0:22`, `[::]:22`) — reachable over both
   tailnet and LAN. ufw inactive.
-- Hardening drop-in `/etc/ssh/sshd_config.d/10-devbox-hardening.conf` (sorts
+- Hardening drop-in `/etc/ssh/sshd_config.d/10-agent-task-hardening.conf` (sorts
   before the cloud-image default `50-cloud-init.conf`, so it wins on first-match):
 
   ```
@@ -253,15 +253,15 @@ echo 'export PATH=/usr/local/go/bin:$PATH' | sudo tee /etc/profile.d/go.sh >/dev
 
 ### Repo clone
 
-Cloned to **`/opt/devbox`** (owned by `qdrtech`) for building. The repo is
+Cloned to **`/opt/agent-task`** (owned by `qdrtech`) for building. The repo is
 private, so it is cloned with the **operator's own `gh` identity** (`gh auth
 login`, device flow) — deliberately **separate** from the daemon's machine-user
 GitHub token (D3), which is never used for source and is wired only at M4.
 
 ```bash
-sudo mkdir -p /opt/devbox && sudo chown "$USER:$USER" /opt/devbox
+sudo mkdir -p /opt/agent-task && sudo chown "$USER:$USER" /opt/agent-task
 gh auth status || gh auth login
-gh repo clone iQonAi/devbox /opt/devbox
+gh repo clone iQonAi/agent-task /opt/agent-task
 ```
 
 ### Service user (`agent-taskd`, distinct from `agentbox`)
@@ -348,7 +348,7 @@ Confirmed 2026-07-17. Delivers the first real token that #5 left as a sentinel.
 - **Org:** `iQonAi` (login `iqonai`; owner `qdrtech`; belongs to QDR Ventures LLC,
   dba iQonAi). `iQonAi-Bot` is an org **Member** and a **Write** collaborator on
   each managed repo (Write = minimal role that allows push + open PR).
-- **Repos moved into the org:** `devbox` (done here → `iQonAi/devbox`).
+- **Repos moved into the org:** `agent-task` (done here → `iQonAi/agent-task`).
   `claude-agent-config` and `case-tracker-fc` are deferred.
 
 **Why an org was required (not just the personal account + machine user).**
@@ -365,7 +365,7 @@ fine-grained per-repo tokens work as `docs/project/0003` requires.
 One **fine-grained** token per repo, minted as `iQonAi-Bot`:
 
 - **Resource owner:** the `iQonAi` org (not the bot's personal account).
-- **Repository access:** only the one repo (`iQonAi/devbox`).
+- **Repository access:** only the one repo (`iQonAi/agent-task`).
 - **Permissions:** Contents R/W, Pull requests R/W, Issues R/W, Metadata R.
   (Issues R/W is a deliberate grant beyond the `contents + PR` baseline so the
   bot can create/manage issues; still repo-scoped.)
@@ -382,7 +382,7 @@ One **fine-grained** token per repo, minted as `iQonAi-Bot`:
 
 Stored on the VM at `/etc/agent-task/credentials/<token_ref>`, root-owned
 `0600`, referenced by name (the config `token_ref`); **never committed**.
-Naming: `gh-token-<repo>` → `gh-token-devbox`. The `agent-taskd` unit's
+Naming: `gh-token-<repo>` → `gh-token-agent-task`. The `agent-taskd` unit's
 `LoadCredential=` line points at it (replaces the #5 sentinel); deferred repos
 each add one line as they join the org.
 
@@ -390,9 +390,9 @@ Write the token without echoing it into shell history or anywhere else — paste
 straight into a root-owned file, stripping the trailing newline:
 
 ```bash
-sudo sh -c 'umask 077; tr -d "\n" > /etc/agent-task/credentials/gh-token-devbox'
+sudo sh -c 'umask 077; tr -d "\n" > /etc/agent-task/credentials/gh-token-agent-task'
 # paste the token, Enter, Ctrl-D
-sudo chmod 0600 /etc/agent-task/credentials/gh-token-devbox
+sudo chmod 0600 /etc/agent-task/credentials/gh-token-agent-task
 ```
 
 ### Host-only invariant (D3)
@@ -405,14 +405,14 @@ container ever receives is the model API key (M3), by env at launch.
 
 ### Validation (all confirmed)
 
-- **Stored:** `gh-token-devbox` is `-rw------- root root`, 93 bytes,
+- **Stored:** `gh-token-agent-task` is `-rw------- root root`, 93 bytes,
   `github_pat_` prefix.
 - **LoadCredential delivery:** `systemd-run --uid=agent-taskd -p LoadCredential=…`
   delivers it as `-r-------- agent-taskd`, 93 bytes, in `$CREDENTIALS_DIRECTORY`.
-- **Negative direct read:** `sudo -u agent-taskd cat …/gh-token-devbox` →
+- **Negative direct read:** `sudo -u agent-taskd cat …/gh-token-agent-task` →
   `Permission denied`.
-- **Token valid + least-privilege:** `gh api repos/iQonAi/devbox` (with the token
-  in `GH_TOKEN`) → `iQonAi/devbox`, permissions `pull:true push:true`,
+- **Token valid + least-privilege:** `gh api repos/iQonAi/agent-task` (with the token
+  in `GH_TOKEN`) → `iQonAi/agent-task`, permissions `pull:true push:true`,
   `admin:false maintain:false`.
 - **Repo-scoped:** the same token → **404** on a repo outside its scope
   (`qdrtech/claude-agent-config`), confirming it cannot reach other repos.
@@ -434,11 +434,11 @@ daemon runs as `agent-taskd` under systemd.
 
 ### Build & install
 
-Built by the operator in `/opt/devbox`, installed to `/usr/local/bin` as root.
+Built by the operator in `/opt/agent-task`, installed to `/usr/local/bin` as root.
 Build as yourself, not as root — nothing about compiling needs privilege:
 
 ```bash
-cd /opt/devbox && git checkout main && git pull
+cd /opt/agent-task && git checkout main && git pull
 go build -o /tmp/agent-task ./cmd/agent-task
 sudo install -m 0755 -o root -g root /tmp/agent-task /usr/local/bin/agent-task
 ```
@@ -448,7 +448,7 @@ matters after the org transfer — an older copy still pointed `Documentation=` 
 the pre-transfer URL:
 
 ```bash
-sudo install -m 0644 /opt/devbox/deploy/systemd/agent-taskd.service \
+sudo install -m 0644 /opt/agent-task/deploy/systemd/agent-taskd.service \
   /etc/systemd/system/agent-taskd.service
 sudo systemctl daemon-reload
 ```
@@ -467,11 +467,11 @@ limits:
   max_concurrent: 2
   task_timeout: 30m
 repos:
-  - name: devbox
+  - name: agent-task
     owner: iQonAi
-    repo: devbox
+    repo: agent-task
     default_branch: main
-    token_ref: gh-token-devbox
+    token_ref: gh-token-agent-task
 ```
 
 `socket_path` and `data_dir` match systemd's `RuntimeDirectory=`/`StateDirectory=`;
@@ -563,7 +563,7 @@ delivered exactly as the daemon will get it:
 
 ```bash
 sudo systemd-run --uid=agent-taskd --pipe --wait -q \
-  -p LoadCredential=gh-token-devbox:/etc/agent-task/credentials/gh-token-devbox \
+  -p LoadCredential=gh-token-agent-task:/etc/agent-task/credentials/gh-token-agent-task \
   -p 'Environment=PATH=/usr/local/go/bin:/usr/bin:/bin' \
   /tmp/verify-m1
 ```
@@ -571,13 +571,13 @@ sudo systemd-run --uid=agent-taskd --pipe --wait -q \
 Output confirmed the full round trip:
 
 ```
-mirror synced: /tmp/m1-verify/mirrors/devbox.git
+mirror synced: /tmp/m1-verify/mirrors/agent-task.git
 worktree: /tmp/m1-verify/worktrees/verify-task branch: agent/claude/m1-smoke-test-smoke01
 worktree torn down OK
 ```
 
 i.e. the machine-user token (delivered only via `LoadCredential`) cloned the
-**private** `iQonAi/devbox` through the credential helper, a worktree was
+**private** `iQonAi/agent-task` through the credential helper, a worktree was
 created off `main`, and teardown removed it. The throwaway and its scratch dir
 (`/tmp/m1-verify`) were deleted afterward.
 
@@ -603,7 +603,7 @@ in `internal/runner` and re-verified through the Go runner.
 ### Environment (Podman 3.4.4, cgroup v2)
 
 - Podman **3.4.4**, runtime **crun**, rootless network **slirp4netns** (as #4).
-- The base image `localhost/devbox-agent-base:dev` (#7) is in `agentbox`'s
+- The base image `localhost/agent-task-base:dev` (#7) is in `agentbox`'s
   rootless storage.
 - `agentbox` has `Linger=yes` so `/run/user/999` exists for rootless Podman.
 
@@ -660,7 +660,7 @@ sudo visudo -cf /etc/sudoers.d/agent-task-podman   # must print: parsed OK
 The `qdrtech` line exists only to run the integration tests as the operator;
 production uses the `agent-taskd` line. The runner pins its working directory to
 `/` because the hop inherits the caller's cwd and `agentbox` cannot `chdir` into
-the daemon's home or `/opt/devbox` (mode 0700); all Podman paths are absolute.
+the daemon's home or `/opt/agent-task` (mode 0700); all Podman paths are absolute.
 
 ### Transfer model (proven)
 
@@ -673,7 +673,7 @@ artifacts as `agentbox`. `cp` of a *missing* `/task/out` is a silent no-op on
 ### Validation (all confirmed through the Go runner)
 
 ```bash
-cd /opt/devbox && git checkout feat/10-m2-container-runner
+cd /opt/agent-task && git checkout feat/10-m2-container-runner
 RUNNER_PODMAN_BASE="sudo -u agentbox /usr/local/sbin/agentbox-podman" \
   go test -tags integration ./internal/runner -v
 ```
@@ -803,14 +803,14 @@ in `.git/config`). M4's standalone run reads it from a file; the daemon wires
 
 ```bash
 # make the root-owned machine-user token readable for a standalone run:
-sudo install -m 600 -o qdrtech /etc/agent-task/credentials/gh-token-devbox /tmp/gh-token
+sudo install -m 600 -o qdrtech /etc/agent-task/credentials/gh-token-agent-task /tmp/gh-token
 ```
 
 ### Running an issue → PR
 
 ```bash
 /tmp/agent-task run \
-  --repo devbox --issue 27 \
+  --repo agent-task --issue 27 \
   --agent claude --auth subscription \
   --podman "sudo -u agentbox /usr/local/sbin/agentbox-podman" \
   --data-dir /tmp/m4-data --work-dir /tmp/m4-work \
@@ -832,7 +832,7 @@ sudo install -m 600 -o qdrtech /etc/agent-task/credentials/gh-token-devbox /tmp/
 ### Validation (confirmed)
 
 A throwaway test issue (create a one-line file) run end-to-end produced PR #28
-on `iQonAi/devbox`: authored by **`iQonAi-Bot`**, base `main`, head
+on `iQonAi/agent-task`: authored by **`iQonAi-Bot`**, base `main`, head
 `agent/claude/<slug>-<id>`, adding exactly `docs/agent-smoke.md`. The PR body
 carried the template (task id, agent, issue link, summary) and the plain marker
 **"Agent-produced — human review required. Do not merge without review."** A
@@ -902,8 +902,8 @@ tasks. This is the first milestone the box can develop itself.
 ### Running / observing tasks
 
 ```bash
-agent-task submit --repo devbox --agent claude --task "…"   # → task id
-agent-task submit --repo devbox --agent claude --issue N    # issue → prompt
+agent-task submit --repo agent-task --agent claude --task "…"   # → task id
+agent-task submit --repo agent-task --agent claude --issue N    # issue → prompt
 agent-task ls                                               # recent tasks + state
 agent-task status <id>                                      # state + full audit trail
 agent-task cancel <id>                                      # stop a running task

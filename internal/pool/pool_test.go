@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/controller"
+	"github.com/iQonAi/agent-task/internal/controller"
 )
 
 // The cap holds: with 2 workers, never more than 2 tasks run at once, and a

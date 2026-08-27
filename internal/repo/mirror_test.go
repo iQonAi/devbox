@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/iQonAi/devbox/internal/gitx"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/gitx"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 func mustGit(t *testing.T, dir string, args ...string) string {
@@ -42,12 +42,12 @@ func TestSyncClonesMirror(t *testing.T) {
 	origin, url := initOrigin(t)
 	m := NewManager(t.TempDir())
 
-	path, err := m.Sync(context.Background(), "devbox", url, "")
+	path, err := m.Sync(context.Background(), "agent-task", url, "")
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if path != m.MirrorPath("devbox") {
-		t.Errorf("path = %q, want %q", path, m.MirrorPath("devbox"))
+	if path != m.MirrorPath("agent-task") {
+		t.Errorf("path = %q, want %q", path, m.MirrorPath("agent-task"))
 	}
 	if got := mustGit(t, path, "rev-parse", "--is-bare-repository"); got != "true" {
 		t.Errorf("mirror is not bare: %q", got)
@@ -68,12 +68,12 @@ func TestSyncFetchesOnSecondCall(t *testing.T) {
 	m := NewManager(t.TempDir())
 	ctx := context.Background()
 
-	if _, err := m.Sync(ctx, "devbox", url, ""); err != nil {
+	if _, err := m.Sync(ctx, "agent-task", url, ""); err != nil {
 		t.Fatalf("first sync: %v", err)
 	}
 	commit(t, origin, "second.txt", "x\n", "second")
 
-	path, err := m.Sync(ctx, "devbox", url, "")
+	path, err := m.Sync(ctx, "agent-task", url, "")
 	if err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
@@ -87,14 +87,14 @@ func TestSyncWithoutCredential(t *testing.T) {
 	_, url := initOrigin(t)
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 
-	if _, err := NewManager(t.TempDir()).Sync(context.Background(), "devbox", url, "gh-token-devbox"); err != nil {
+	if _, err := NewManager(t.TempDir()).Sync(context.Background(), "agent-task", url, "gh-token-agent-task"); err != nil {
 		t.Fatalf("sync without credential: %v", err)
 	}
 }
 
 func TestCloneURL(t *testing.T) {
-	got := CloneURL(store.Repo{Owner: "iQonAi", Repo: "devbox"})
-	if want := "https://github.com/iQonAi/devbox.git"; got != want {
+	got := CloneURL(store.Repo{Owner: "iQonAi", Repo: "agent-task"})
+	if want := "https://github.com/iQonAi/agent-task.git"; got != want {
 		t.Errorf("CloneURL = %q, want %q", got, want)
 	}
 }

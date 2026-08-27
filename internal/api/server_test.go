@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 // newTestServer returns an api.Server backed by a fresh temp-dir database.
@@ -40,8 +40,8 @@ func TestHealthz(t *testing.T) {
 func TestReposEndpoint(t *testing.T) {
 	srv := newTestServer(t)
 	if err := srv.store.UpsertRepo(store.Repo{
-		Name: "devbox", Owner: "iQonAi", Repo: "devbox",
-		DefaultBranch: "main", TokenRef: "gh-token-devbox",
+		Name: "agent-task", Owner: "iQonAi", Repo: "agent-task",
+		DefaultBranch: "main", TokenRef: "gh-token-agent-task",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -55,10 +55,10 @@ func TestReposEndpoint(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &repos); err != nil {
 		t.Fatalf("decode: %v (body %s)", err, rec.Body)
 	}
-	if len(repos) != 1 || repos[0].Name != "devbox" {
-		t.Fatalf("got %+v, want one repo named devbox", repos)
+	if len(repos) != 1 || repos[0].Name != "agent-task" {
+		t.Fatalf("got %+v, want one repo named agent-task", repos)
 	}
-	if repos[0].TokenRef != "gh-token-devbox" {
+	if repos[0].TokenRef != "gh-token-agent-task" {
 		t.Errorf("token_ref = %q", repos[0].TokenRef)
 	}
 }

@@ -1,4 +1,4 @@
-# 0003 - Agent Devbox Security & Threat Model
+# 0003 - Agent-Task Security & Threat Model
 
 ## Security Philosophy
 
@@ -18,7 +18,7 @@ Level 1
 User devices
 
 Level 2
-Devbox VM
+Agent-Task VM
 
 Level 3
 Execution containers
@@ -68,8 +68,8 @@ Execution containers may not access:
 
 ## Tailscale Model
 
-User Devices → Devbox
-Devbox → Internet
+User Devices → Agent-Task VM
+Agent-Task VM → Internet
 Containers → Internet
 
 Containers must not become a bridge into the home network.

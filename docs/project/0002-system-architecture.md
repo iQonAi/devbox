@@ -1,4 +1,4 @@
-# 0002 - Agent Devbox System Architecture
+# 0002 - Agent-Task System Architecture
 
 ## Architecture
 
@@ -6,7 +6,7 @@ User Device
 ↓
 Tailscale
 ↓
-Devbox VM
+Agent-Task VM
 ↓
 Task Controller
 ↓
@@ -18,7 +18,7 @@ GitHub
 
 ## Components
 
-### Devbox VM
+### Agent-Task VM
 
 Responsibilities:
 - Task orchestration

@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iQonAi/devbox/internal/agent"
-	"github.com/iQonAi/devbox/internal/github"
-	"github.com/iQonAi/devbox/internal/prompt"
-	"github.com/iQonAi/devbox/internal/repo"
-	"github.com/iQonAi/devbox/internal/runner"
-	"github.com/iQonAi/devbox/internal/store"
+	"github.com/iQonAi/agent-task/internal/agent"
+	"github.com/iQonAi/agent-task/internal/github"
+	"github.com/iQonAi/agent-task/internal/prompt"
+	"github.com/iQonAi/agent-task/internal/repo"
+	"github.com/iQonAi/agent-task/internal/runner"
+	"github.com/iQonAi/agent-task/internal/store"
 )
 
 // Terminal states (D9).

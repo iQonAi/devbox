@@ -16,7 +16,7 @@ const (
 	defaultMaxConcurrent = 2
 	defaultTaskTimeout   = "30m"
 	defaultBranch        = "main"
-	defaultImage         = "localhost/devbox-agent-base:dev"
+	defaultImage         = "localhost/agent-task-base:dev"
 	defaultPodman        = "podman"
 )
 

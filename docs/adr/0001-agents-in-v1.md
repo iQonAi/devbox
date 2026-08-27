@@ -4,7 +4,7 @@
 
 ## Context
 
-The devbox runs coding agents as untrusted code inside disposable containers
+Agent-Task runs coding agents as untrusted code inside disposable containers
 (D4 full-transfer model). Each agent has its own CLI, auth mechanism,
 non-interactive invocation, and transcript format. The system needs more than
 one agent to prove the abstraction isn't shaped around a single vendor, but
